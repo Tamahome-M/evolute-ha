@@ -1,0 +1,43 @@
+"""Evolute integration — direct cloud polling, no proxy addon needed."""
+from __future__ import annotations
+
+import logging
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+
+from .const import DOMAIN, DATA_COORDINATOR, CONF_ACCESS_TOKEN, CONF_REFRESH_TOKEN, CONF_SCAN_INTERVAL
+from .coordinator import EvolUteCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+
+PLATFORMS = ["sensor", "binary_sensor", "lock", "button", "device_tracker"]
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    coordinator = EvolUteCoordinator(hass, entry)
+    await coordinator.async_config_entry_first_refresh()
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {DATA_COORDINATOR: coordinator}
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload on options change (new tokens or scan interval)."""
+    # Merge options back into data if tokens were updated via options flow
+    new_data = dict(entry.data)
+    opts = entry.options
+    for key in (CONF_ACCESS_TOKEN, CONF_REFRESH_TOKEN, CONF_SCAN_INTERVAL):
+        if key in opts:
+            new_data[key] = opts[key]
+    hass.config_entries.async_update_entry(entry, data=new_data, options={})
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        hass.data[DOMAIN].pop(entry.entry_id)
+    return unload_ok

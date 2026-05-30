@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Подключение Evolute",
+        "description": "Введите данные для подключения к evassist.ru.\n\nТокены можно получить из браузера: откройте app.evassist.ru, войдите в аккаунт, затем в DevTools → Application → Cookies найдите `evy-platform-access` и `evy-platform-refresh`.\n\nID автомобиля можно найти в URL после входа или в запросах к API.",
+        "data": {
+          "car_id": "ID автомобиля",
+          "access_token": "Access Token (evy-platform-access)",
+          "refresh_token": "Refresh Token (evy-platform-refresh)",
+          "scan_interval": "Интервал опроса (секунды)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Неверные токены или истёк срок действия. Получите новые из браузера.",
+      "cannot_connect": "Не удалось подключиться к evassist.ru. Проверьте интернет-соединение.",
+      "unknown": "Неизвестная ошибка"
+    },
+    "abort": {
+      "already_configured": "Этот автомобиль уже настроен"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки Evolute",
+        "description": "Обновите токены, если интеграция перестала получать данные.",
+        "data": {
+          "scan_interval": "Интервал опроса (секунды)",
+          "access_token": "Access Token (оставьте без изменений, если не нужно обновлять)",
+          "refresh_token": "Refresh Token (оставьте без изменений, если не нужно обновлять)"
+        }
+      }
+    }
+  }
+}

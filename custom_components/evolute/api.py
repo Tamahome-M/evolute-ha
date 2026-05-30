@@ -1,0 +1,104 @@
+"""Evolute API client — direct access to app.evassist.ru."""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import requests
+
+from .const import BASE_URL, REFRESH_URL, USER_AGENT
+
+_LOGGER = logging.getLogger(__name__)
+
+TIMEOUT = 20
+
+
+class EvolUteAuthError(Exception):
+    """Raised when tokens are invalid and refresh fails."""
+
+
+class EvolUteAPIError(Exception):
+    """General API error."""
+
+
+class EvolUteClient:
+    """Low-level HTTP client for evassist.ru."""
+
+    def __init__(self, car_id: str, access_token: str, refresh_token: str) -> None:
+        self.car_id = car_id
+        self.access_token = access_token
+        self.refresh_token = refresh_token
+        self._session = requests.Session()
+        self._session.headers["User-Agent"] = USER_AGENT
+
+    # ------------------------------------------------------------------
+    # Token management
+    # ------------------------------------------------------------------
+
+    def _cookies(self) -> dict[str, str]:
+        return {
+            "evy-platform-access": self.access_token,
+            "evy-platform-refresh": self.refresh_token,
+        }
+
+    def refresh_tokens(self) -> tuple[str, str]:
+        """Exchange refresh token for a new pair. Returns (access, refresh)."""
+        try:
+            resp = self._session.post(
+                REFRESH_URL,
+                json={"refreshToken": self.refresh_token},
+                timeout=TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            raise EvolUteAPIError(f"Network error during token refresh: {exc}") from exc
+
+        if resp.status_code == 401:
+            raise EvolUteAuthError("Refresh token rejected (401). Re-enter tokens.")
+        if resp.status_code == 403:
+            raise EvolUteAuthError("Refresh token forbidden (403). Re-enter tokens.")
+        if not resp.ok:
+            raise EvolUteAPIError(f"Token refresh failed: HTTP {resp.status_code}")
+
+        data = resp.json()
+        self.access_token = data["accessToken"]
+        self.refresh_token = data["refreshToken"]
+        _LOGGER.debug("Tokens refreshed successfully")
+        return self.access_token, self.refresh_token
+
+    # ------------------------------------------------------------------
+    # Data fetching
+    # ------------------------------------------------------------------
+
+    def _get(self, url: str) -> Any:
+        resp = self._session.get(url, cookies=self._cookies(), timeout=TIMEOUT)
+        if resp.status_code == 401:
+            raise EvolUteAuthError("Access denied (401). Tokens expired.")
+        resp.raise_for_status()
+        return resp.json()
+
+    def _post(self, url: str, payload: dict | None = None) -> Any:
+        resp = self._session.post(
+            url,
+            cookies=self._cookies(),
+            json=payload or {},
+            timeout=TIMEOUT,
+        )
+        if resp.status_code == 401:
+            raise EvolUteAuthError("Access denied (401). Tokens expired.")
+        resp.raise_for_status()
+        return resp.json()
+
+    def fetch_tbox_info(self) -> dict:
+        """Fetch full tbox sensor payload."""
+        url = f"{BASE_URL}/car-service/tbox/{self.car_id}/info"
+        return self._get(url)
+
+    def fetch_car_info(self) -> dict:
+        """Fetch static car info (VIN, model, colour…)."""
+        url = f"{BASE_URL}/car-service/car/v2/{self.car_id}"
+        return self._get(url)
+
+    def tbox_command(self, endpoint: str, payload: dict | None = None) -> Any:
+        """POST a command to /car-service/tbox/<car_id>/<endpoint>."""
+        url = f"{BASE_URL}/car-service/tbox/{self.car_id}/{endpoint}"
+        return self._post(url, payload)

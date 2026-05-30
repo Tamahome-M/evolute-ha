@@ -1,0 +1,12 @@
+{
+  "domain": "evolute",
+  "name": "Evolute",
+  "version": "1.0.0",
+  "config_flow": true,
+  "documentation": "https://github.com/your-github-username/evolute-ha",
+  "issue_tracker": "https://github.com/your-github-username/evolute-ha/issues",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": ["@your-github-username"],
+  "iot_class": "cloud_polling"
+}

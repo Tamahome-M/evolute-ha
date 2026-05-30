@@ -1,0 +1,36 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Evolute Setup",
+        "description": "Enter your evassist.ru credentials.\n\nGet tokens from browser DevTools → Application → Cookies on app.evassist.ru: copy `evy-platform-access` and `evy-platform-refresh` values.",
+        "data": {
+          "car_id": "Car ID",
+          "access_token": "Access Token (evy-platform-access)",
+          "refresh_token": "Refresh Token (evy-platform-refresh)",
+          "scan_interval": "Polling interval (seconds)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid or expired tokens. Get fresh ones from the browser.",
+      "cannot_connect": "Cannot connect to evassist.ru.",
+      "unknown": "Unknown error"
+    },
+    "abort": {
+      "already_configured": "This car is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Evolute Options",
+        "data": {
+          "scan_interval": "Polling interval (seconds)",
+          "access_token": "Access Token (leave unchanged if still valid)",
+          "refresh_token": "Refresh Token (leave unchanged if still valid)"
+        }
+      }
+    }
+  }
+}
