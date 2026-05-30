@@ -14,7 +14,7 @@ class EvolUteEntity(CoordinatorEntity[EvolUteCoordinator]):
     def __init__(self, coordinator: EvolUteCoordinator, unique_suffix: str) -> None:
         super().__init__(coordinator)
         s = coordinator.sensors
-        vin = s.get("vin") or coordinator.config_entry.data.get("car_id", "unknown")
+        vin = s.get("vin") or coordinator._entry.data.get("car_id", "unknown")
         model = s.get("carModelName") or "Evolute"
         year = s.get("carModelYear") or ""
         modname = s.get("carModelModname") or ""

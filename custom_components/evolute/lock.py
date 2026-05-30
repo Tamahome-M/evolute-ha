@@ -30,7 +30,7 @@ class EvolUteLock(EvolUteEntity, LockEntity):
         if val is None:
             return None
         try:
-            return int(val) != 1   # 1 = открыт в API Evolute
+            return int(val) == 1   # 1 = закрыт в API Evolute
         except (TypeError, ValueError):
             return None
 

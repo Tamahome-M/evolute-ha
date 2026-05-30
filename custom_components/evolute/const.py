@@ -25,8 +25,8 @@ BASE_URL = "https://app.evassist.ru"
 REFRESH_URL = f"{BASE_URL}/id-service/auth/refresh-token"
 
 INTELLIGENT_ACTIONS = {
-    "lock_close": ("centralLockingToggle", "centralLockingStatus", 1),
-    "lock_open":  ("centralLockingToggle", "centralLockingStatus", 0),
+    "lock_close": ("centralLockingToggle", "centralLockingStatus", 1),  # пропустить если уже закрыт
+    "lock_open":  ("centralLockingToggle", "centralLockingStatus", 0),  # пропустить если уже открыт
     "heating_on":  ("heating",  "climateStatus", 1),
     "heating_off": ("heating",  "climateStatus", 0),
     "cooling_on":  ("cooling",  "climateStatus", 1),
