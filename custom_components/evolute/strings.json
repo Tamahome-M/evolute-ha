@@ -8,7 +8,9 @@
           "car_id": "Car ID",
           "access_token": "Access Token (evy-platform-access)",
           "refresh_token": "Refresh Token (evy-platform-refresh)",
-          "scan_interval": "Polling interval (seconds)"
+          "scan_interval": "Sensor polling interval (seconds)",
+          "timeout": "API request timeout (seconds)",
+          "token_refresh_interval": "Token refresh interval (seconds)"
         }
       }
     },
@@ -26,7 +28,9 @@
       "init": {
         "title": "Evolute Options",
         "data": {
-          "scan_interval": "Polling interval (seconds)",
+          "scan_interval": "Sensor polling interval (seconds)",
+          "timeout": "API request timeout (seconds)",
+          "token_refresh_interval": "Token refresh interval (seconds)",
           "access_token": "Access Token (leave unchanged if still valid)",
           "refresh_token": "Refresh Token (leave unchanged if still valid)"
         }

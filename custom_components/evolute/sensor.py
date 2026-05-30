@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -84,9 +85,9 @@ SENSORS: tuple[_Desc, ...] = (
     _Desc(key="diagnostics", data_key="diagnostics", name="Диагностический код",
           icon="mdi:alert-circle-outline"),
     _Desc(key="last_online", data_key="lastOnlineTime", name="Последний онлайн",
-          icon="mdi:clock-outline"),
+          device_class=SensorDeviceClass.TIMESTAMP, icon="mdi:clock-outline"),
     _Desc(key="sensor_time", data_key="sensorDataTime", name="Время данных",
-          icon="mdi:timeline-clock"),
+          device_class=SensorDeviceClass.TIMESTAMP, icon="mdi:timeline-clock"),
     _Desc(key="vin", data_key="vin", name="VIN", icon="mdi:card-account-details",
           entity_registry_enabled_default=False),
     _Desc(key="car_model", data_key="carModelName", name="Модель", icon="mdi:car-info",
@@ -117,7 +118,10 @@ SENSORS: tuple[_Desc, ...] = (
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
                             async_add_entities: AddEntitiesCallback) -> None:
     coord: EvolUteCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    async_add_entities(EvolUteSensor(coord, d) for d in SENSORS)
+    async_add_entities(
+        EvolUteTimestampSensor(coord, d) if d.key in _TIMESTAMP_KEYS else EvolUteSensor(coord, d)
+        for d in SENSORS
+    )
 
 
 class EvolUteSensor(EvolUteEntity, SensorEntity):
@@ -133,3 +137,20 @@ class EvolUteSensor(EvolUteEntity, SensorEntity):
         src = self.coordinator.sensors if self.entity_description.source == "sensors" \
             else self.coordinator.position
         return src.get(self.entity_description.data_key)
+
+
+_TIMESTAMP_KEYS = {"last_online", "sensor_time"}
+
+
+class EvolUteTimestampSensor(EvolUteSensor):
+    """Sensor that converts a unix timestamp (int/float) to aware datetime."""
+
+    @property
+    def native_value(self) -> datetime | None:
+        raw = self.coordinator.sensors.get(self.entity_description.data_key)
+        if raw is None:
+            return None
+        try:
+            return datetime.fromtimestamp(int(raw), tz=timezone.utc)
+        except (TypeError, ValueError, OSError):
+            return None

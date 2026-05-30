@@ -16,7 +16,11 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL,
+    CONF_TIMEOUT,
+    CONF_TOKEN_REFRESH_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_TIMEOUT,
+    DEFAULT_TOKEN_REFRESH_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,6 +49,12 @@ _USER_SCHEMA = vol.Schema(
         vol.Required(CONF_REFRESH_TOKEN): str,
         vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
             int, vol.Range(min=30, max=3600)
+        ),
+        vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): vol.All(
+            int, vol.Range(min=5, max=120)
+        ),
+        vol.Optional(CONF_TOKEN_REFRESH_INTERVAL, default=DEFAULT_TOKEN_REFRESH_INTERVAL): vol.All(
+            int, vol.Range(min=60, max=86400)
         ),
     }
 )
@@ -113,6 +123,14 @@ class EvolUteOptionsFlow(config_entries.OptionsFlow):
             CONF_SCAN_INTERVAL,
             self._entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         )
+        current_timeout = self._entry.options.get(
+            CONF_TIMEOUT,
+            self._entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
+        )
+        current_refresh_interval = self._entry.options.get(
+            CONF_TOKEN_REFRESH_INTERVAL,
+            self._entry.data.get(CONF_TOKEN_REFRESH_INTERVAL, DEFAULT_TOKEN_REFRESH_INTERVAL),
+        )
         current_access = self._entry.data.get(CONF_ACCESS_TOKEN, "")
         current_refresh = self._entry.data.get(CONF_REFRESH_TOKEN, "")
 
@@ -120,6 +138,12 @@ class EvolUteOptionsFlow(config_entries.OptionsFlow):
             {
                 vol.Optional(CONF_SCAN_INTERVAL, default=current_interval): vol.All(
                     int, vol.Range(min=30, max=3600)
+                ),
+                vol.Optional(CONF_TIMEOUT, default=current_timeout): vol.All(
+                    int, vol.Range(min=5, max=120)
+                ),
+                vol.Optional(CONF_TOKEN_REFRESH_INTERVAL, default=current_refresh_interval): vol.All(
+                    int, vol.Range(min=60, max=86400)
                 ),
                 vol.Optional(CONF_ACCESS_TOKEN, default=current_access): str,
                 vol.Optional(CONF_REFRESH_TOKEN, default=current_refresh): str,

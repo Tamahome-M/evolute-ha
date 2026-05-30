@@ -8,7 +8,9 @@
           "car_id": "ID автомобиля",
           "access_token": "Access Token (evy-platform-access)",
           "refresh_token": "Refresh Token (evy-platform-refresh)",
-          "scan_interval": "Интервал опроса (секунды)"
+          "scan_interval": "Интервал опроса сенсоров (секунды)",
+          "timeout": "Таймаут запросов к API (секунды)",
+          "token_refresh_interval": "Интервал обновления токенов (секунды)"
         }
       }
     },
@@ -27,7 +29,9 @@
         "title": "Настройки Evolute",
         "description": "Обновите токены, если интеграция перестала получать данные.",
         "data": {
-          "scan_interval": "Интервал опроса (секунды)",
+          "scan_interval": "Интервал опроса сенсоров (секунды)",
+          "timeout": "Таймаут запросов к API (секунды)",
+          "token_refresh_interval": "Интервал обновления токенов (секунды)",
           "access_token": "Access Token (оставьте без изменений, если не нужно обновлять)",
           "refresh_token": "Refresh Token (оставьте без изменений, если не нужно обновлять)"
         }

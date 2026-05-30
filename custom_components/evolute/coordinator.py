@@ -17,7 +17,11 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL,
+    CONF_TIMEOUT,
+    CONF_TOKEN_REFRESH_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_TIMEOUT,
+    DEFAULT_TOKEN_REFRESH_INTERVAL,
     INTELLIGENT_ACTIONS,
 )
 
@@ -32,10 +36,15 @@ class EvolUteCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
         interval = entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        self._token_refresh_interval: int = entry.data.get(
+            CONF_TOKEN_REFRESH_INTERVAL, DEFAULT_TOKEN_REFRESH_INTERVAL
+        )
+        self._last_token_refresh: float = 0.0
         self.client = EvolUteClient(
             car_id=entry.data[CONF_CAR_ID],
             access_token=entry.data[CONF_ACCESS_TOKEN],
             refresh_token=entry.data[CONF_REFRESH_TOKEN],
+            timeout=entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
         )
         super().__init__(
             hass,
@@ -50,9 +59,11 @@ class EvolUteCoordinator(DataUpdateCoordinator):
 
     async def _async_refresh_and_persist(self) -> None:
         """Refresh tokens and save new values into config entry data."""
+        import time
         access, refresh = await self.hass.async_add_executor_job(
             self.client.refresh_tokens
         )
+        self._last_token_refresh = time.monotonic()
         self.hass.config_entries.async_update_entry(
             self._entry,
             data={
@@ -68,6 +79,15 @@ class EvolUteCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> dict[str, Any]:
+        import time
+        # Proactive token refresh by configured interval
+        if time.monotonic() - self._last_token_refresh >= self._token_refresh_interval:
+            _LOGGER.debug("Proactive token refresh (interval=%ds)", self._token_refresh_interval)
+            try:
+                await self._async_refresh_and_persist()
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning("Proactive token refresh failed: %s", exc)
+
         try:
             tbox_raw = await self.hass.async_add_executor_job(
                 self.client.fetch_tbox_info

@@ -6,11 +6,10 @@ from typing import Any
 
 import requests
 
-from .const import BASE_URL, REFRESH_URL, USER_AGENT
+from .const import BASE_URL, REFRESH_URL, USER_AGENT, DEFAULT_TIMEOUT
+
 
 _LOGGER = logging.getLogger(__name__)
-
-TIMEOUT = 20
 
 
 class EvolUteAuthError(Exception):
@@ -24,16 +23,14 @@ class EvolUteAPIError(Exception):
 class EvolUteClient:
     """Low-level HTTP client for evassist.ru."""
 
-    def __init__(self, car_id: str, access_token: str, refresh_token: str) -> None:
+    def __init__(self, car_id: str, access_token: str, refresh_token: str,
+                 timeout: int = DEFAULT_TIMEOUT) -> None:
         self.car_id = car_id
         self.access_token = access_token
         self.refresh_token = refresh_token
+        self.timeout = timeout
         self._session = requests.Session()
         self._session.headers["User-Agent"] = USER_AGENT
-
-    # ------------------------------------------------------------------
-    # Token management
-    # ------------------------------------------------------------------
 
     def _cookies(self) -> dict[str, str]:
         return {
@@ -47,7 +44,7 @@ class EvolUteClient:
             resp = self._session.post(
                 REFRESH_URL,
                 json={"refreshToken": self.refresh_token},
-                timeout=TIMEOUT,
+                timeout=self.timeout,
             )
         except requests.RequestException as exc:
             raise EvolUteAPIError(f"Network error during token refresh: {exc}") from exc
@@ -65,12 +62,8 @@ class EvolUteClient:
         _LOGGER.debug("Tokens refreshed successfully")
         return self.access_token, self.refresh_token
 
-    # ------------------------------------------------------------------
-    # Data fetching
-    # ------------------------------------------------------------------
-
     def _get(self, url: str) -> Any:
-        resp = self._session.get(url, cookies=self._cookies(), timeout=TIMEOUT)
+        resp = self._session.get(url, cookies=self._cookies(), timeout=self.timeout)
         if resp.status_code == 401:
             raise EvolUteAuthError("Access denied (401). Tokens expired.")
         resp.raise_for_status()
@@ -81,7 +74,7 @@ class EvolUteClient:
             url,
             cookies=self._cookies(),
             json=payload or {},
-            timeout=TIMEOUT,
+            timeout=self.timeout,
         )
         if resp.status_code == 401:
             raise EvolUteAuthError("Access denied (401). Tokens expired.")
@@ -89,16 +82,13 @@ class EvolUteClient:
         return resp.json()
 
     def fetch_tbox_info(self) -> dict:
-        """Fetch full tbox sensor payload."""
         url = f"{BASE_URL}/car-service/tbox/{self.car_id}/info"
         return self._get(url)
 
     def fetch_car_info(self) -> dict:
-        """Fetch static car info (VIN, model, colour…)."""
         url = f"{BASE_URL}/car-service/car/v2/{self.car_id}"
         return self._get(url)
 
     def tbox_command(self, endpoint: str, payload: dict | None = None) -> Any:
-        """POST a command to /car-service/tbox/<car_id>/<endpoint>."""
         url = f"{BASE_URL}/car-service/tbox/{self.car_id}/{endpoint}"
         return self._post(url, payload)

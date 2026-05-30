@@ -6,8 +6,12 @@ CONF_CAR_ID = "car_id"
 CONF_ACCESS_TOKEN = "access_token"
 CONF_REFRESH_TOKEN = "refresh_token"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_TIMEOUT = "timeout"
+CONF_TOKEN_REFRESH_INTERVAL = "token_refresh_interval"
 
 DEFAULT_SCAN_INTERVAL = 120
+DEFAULT_TIMEOUT = 20
+DEFAULT_TOKEN_REFRESH_INTERVAL = 600
 
 DATA_COORDINATOR = "coordinator"
 
