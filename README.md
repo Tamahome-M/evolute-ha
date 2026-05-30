@@ -55,7 +55,45 @@ Car ID — это хэш вашего автомобиля. Его можно н
 
 ---
 
-## Обновление токенов
+## Dashboard карточка
+
+В папке [`lovelace/card.yaml`](lovelace/card.yaml) лежит готовая карточка.
+
+**Требует:** [button-card](https://github.com/custom-cards/button-card) (устанавливается через HACS → Frontend).
+
+### Как добавить
+
+1. Установите **button-card** через HACS → Frontend
+2. Скопируйте содержимое `lovelace/card.yaml`
+3. В дашборде нажмите **Добавить карточку → Вручную (Manual)** и вставьте YAML
+4. Замените все `EVOLUTE_*` на ваши реальные entity_id
+
+### Как найти свои entity_id
+
+Перейдите в **Разработчик → Состояния**, введите в поиск `evolute` — увидите все entity вашей интеграции. Нужные суффиксы:
+
+| Placeholder в карточке | Что это | Пример entity_id |
+|---|---|---|
+| `EVOLUTE_ONLINE` | Онлайн | `binary_sensor.evolute_i_pro_2022_onlajn` |
+| `EVOLUTE_ODOMETER` | Одометр | `sensor.evolute_i_pro_2022_odometr` |
+| `EVOLUTE_BATTERY_PCT` | Заряд батареи | `sensor.evolute_i_pro_2022_zaryad_batarei` |
+| `EVOLUTE_FUEL_PCT` | Уровень топлива | `sensor.evolute_i_pro_2022_uroven_topliva` |
+| `EVOLUTE_REMAINS_MILEAGE` | Запас хода (батарея) | `sensor.evolute_i_pro_2022_zapas_hoda_batareya` |
+| `EVOLUTE_REMAINS_MILEAGE_FUEL` | Запас хода (топливо) | `sensor.evolute_i_pro_2022_zapas_hoda_toplivo` |
+| `EVOLUTE_COOLANT_TEMP` | Температура ОЖ | `sensor.evolute_i_pro_2022_temperatura_ozh` |
+| `EVOLUTE_VOLTAGE_12V` | Напряжение 12В | `sensor.evolute_i_pro_2022_napryazhenie_12v_akb` |
+| `EVOLUTE_OUTSIDE_TEMP` | Температура снаружи | `sensor.evolute_i_pro_2022_temperatura_snaruzhi` |
+| `EVOLUTE_INBOARD_TEMP` | Температура в салоне | `sensor.evolute_i_pro_2022_temperatura_v_salone` |
+| `EVOLUTE_VIN` | VIN | `sensor.evolute_i_pro_2022_vin` |
+| `EVOLUTE_CAR_MODEL` | Модель | `sensor.evolute_i_pro_2022_model` |
+| `EVOLUTE_CAR_YEAR` | Год | `sensor.evolute_i_pro_2022_god_vypuska` |
+| `EVOLUTE_CENTRAL_LOCK` | Замок | `lock.evolute_i_pro_2022_centralnyj_zamok` |
+| `EVOLUTE_TRUNK` | Багажник | `binary_sensor.evolute_i_pro_2022_bagazhnik` |
+| `EVOLUTE_TRUNK_OPEN` | Кнопка открыть багажник | `button.evolute_i_pro_2022_otkryt_bagazhnik` |
+| `EVOLUTE_TRUNK_CLOSE` | Кнопка закрыть багажник | `button.evolute_i_pro_2022_zakryt_bagazhnik` |
+| `EVOLUTE_BLINK` | Кнопка мигнуть фарами | `button.evolute_i_pro_2022_mignut_farami` |
+| `EVOLUTE_PREPARE_ON` | Кнопка предпрогрев | `button.evolute_i_pro_2022_predprogrev_vkl` |
+| `EVOLUTE_LOCATION` | Трекер GPS | `device_tracker.evolute_i_pro_2022_mestopolozhenie` |
 
 Токены **обновляются автоматически** через refresh token при каждом успешном опросе.
 
