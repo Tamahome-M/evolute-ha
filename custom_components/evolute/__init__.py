@@ -20,7 +20,10 @@ CARD_FILE = Path(__file__).parent / "www" / "evolute-card.js"
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Регистрируем статический путь для JS-карточки."""
-    hass.http.register_static_path(CARD_URL, str(CARD_FILE), cache_headers=False)
+    from homeassistant.components.http import StaticPathConfig
+    await hass.http.async_register_static_paths([
+        StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=False)
+    ])
     return True
 
 
