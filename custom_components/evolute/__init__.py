@@ -53,18 +53,10 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         _LOGGER.info("Evolute card зарегистрирован как Lovelace-ресурс: %s", CARD_URL)
     except Exception as exc:  # noqa: BLE001
         _LOGGER.debug("Не удалось авторегистрировать Lovelace-ресурс: %s", exc)
-    coordinator = EvolUteCoordinator(hass, entry)
-    await coordinator.async_config_entry_first_refresh()
-
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {DATA_COORDINATOR: coordinator}
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-    return True
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload on options change (new tokens or scan interval)."""
-    # Merge options back into data if tokens were updated via options flow
     new_data = dict(entry.data)
     opts = entry.options
     for key in (CONF_ACCESS_TOKEN, CONF_REFRESH_TOKEN, CONF_SCAN_INTERVAL):
