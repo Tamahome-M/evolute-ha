@@ -23,7 +23,8 @@ class EvolUteCard extends HTMLElement {
   }
 
   // -----------------------------------------------------------------------
-  // Поиск entity по translation_key (= key из SensorEntityDescription)
+  // Поиск entity по суффиксу unique_id (= description.key из Python)
+  // unique_id формируется как: evolute_{vin}_{key}
   // -----------------------------------------------------------------------
   _discover() {
     const { entities, devices } = this._hass;
@@ -39,11 +40,14 @@ class EvolUteCard extends HTMLElement {
     if (!deviceId) return;
     this._deviceId = deviceId;
 
+    // unique_id = "evolute_{vin}_{key}" — ищем по последней части после последнего "_key"
+    // Точнее: unique_id заканчивается на "_{key}", где key не содержит пробелов
     const find = (key, domain) => {
+      const suffix = `_${key}`;
       for (const [eid, entry] of Object.entries(entities)) {
         if (entry.device_id !== deviceId) continue;
         if (domain && eid.split(".")[0] !== domain) continue;
-        if (entry.translation_key === key) return eid;
+        if (entry.unique_id && entry.unique_id.endsWith(suffix)) return eid;
       }
       return null;
     };
