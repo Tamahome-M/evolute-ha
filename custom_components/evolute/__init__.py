@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from homeassistant.components import frontend
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -19,11 +21,11 @@ CARD_FILE = Path(__file__).parent / "www" / "evolute-card.js"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Регистрируем статический путь для JS-карточки."""
-    from homeassistant.components.http import StaticPathConfig
+    """Регистрируем статический путь и подключаем JS карточку."""
     await hass.http.async_register_static_paths([
         StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=False)
     ])
+    frontend.async_register_extra_module_url(hass, CARD_URL)
     return True
 
 
@@ -34,25 +36,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {DATA_COORDINATOR: coordinator}
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-
-    await _async_register_lovelace_resource(hass)
     return True
-
-
-async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
-    """Добавляет JS карточку в Lovelace ресурсы, если ещё не добавлена."""
-    try:
-        from homeassistant.components.lovelace.resources import ResourceStorageCollection
-        resources = hass.data.get("lovelace", {}).get("resources")
-        if not isinstance(resources, ResourceStorageCollection):
-            return
-        await resources.async_load()
-        if any(r.get("url") == CARD_URL for r in resources.async_items()):
-            return
-        await resources.async_create_item({"res_type": "module", "url": CARD_URL})
-        _LOGGER.info("Evolute card зарегистрирован как Lovelace-ресурс: %s", CARD_URL)
-    except Exception as exc:  # noqa: BLE001
-        _LOGGER.debug("Не удалось авторегистрировать Lovelace-ресурс: %s", exc)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
