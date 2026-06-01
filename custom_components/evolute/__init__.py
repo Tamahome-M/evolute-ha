@@ -2,30 +2,30 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
-from homeassistant.components import frontend
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, EVENT_HOMEASSISTANT_STARTED, HomeAssistant
 
 from .const import DOMAIN, DATA_COORDINATOR, CONF_ACCESS_TOKEN, CONF_REFRESH_TOKEN, CONF_SCAN_INTERVAL
 from .coordinator import EvolUteCoordinator
+from .frontend import async_register_frontend
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "binary_sensor", "lock", "button", "device_tracker"]
 
-CARD_URL = f"/{DOMAIN}/evolute-card.js"
-CARD_FILE = Path(__file__).parent / "www" / "evolute-card.js"
-
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Регистрируем статический путь и подключаем JS карточку."""
-    await hass.http.async_register_static_paths([
-        StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=False)
-    ])
-    frontend.async_register_extra_module_url(hass, CARD_URL)
+    """Регистрируем JS-карточку при старте Home Assistant."""
+
+    async def _register(_event=None) -> None:
+        await async_register_frontend(hass)
+
+    if hass.state == CoreState.running:
+        await _register()
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register)
+
     return True
 
 
@@ -40,12 +40,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload on options change (new tokens or scan interval)."""
+    """Перезагрузка при изменении настроек."""
     new_data = dict(entry.data)
-    opts = entry.options
     for key in (CONF_ACCESS_TOKEN, CONF_REFRESH_TOKEN, CONF_SCAN_INTERVAL):
-        if key in opts:
-            new_data[key] = opts[key]
+        if key in entry.options:
+            new_data[key] = entry.options[key]
     hass.config_entries.async_update_entry(entry, data=new_data, options={})
     await hass.config_entries.async_reload(entry.entry_id)
 

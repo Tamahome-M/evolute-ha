@@ -6,7 +6,7 @@
   "documentation": "https://github.com/Tamahome-M/evolute-ha",
   "issue_tracker": "https://github.com/Tamahome-M/evolute-ha/issues",
   "requirements": [],
-  "dependencies": [],
+  "dependencies": ["frontend", "http"],
   "codeowners": ["@Tamahome-M"],
   "iot_class": "cloud_polling"
 }
