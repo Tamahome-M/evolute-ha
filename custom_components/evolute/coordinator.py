@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import timedelta
 from typing import Any
 
@@ -40,6 +41,7 @@ class EvolUteCoordinator(DataUpdateCoordinator):
             CONF_TOKEN_REFRESH_INTERVAL, DEFAULT_TOKEN_REFRESH_INTERVAL
         )
         self._last_token_refresh: float = 0.0
+        self._token_refresh_in_progress: bool = False
         self.client = EvolUteClient(
             car_id=entry.data[CONF_CAR_ID],
             access_token=entry.data[CONF_ACCESS_TOKEN],
@@ -59,7 +61,6 @@ class EvolUteCoordinator(DataUpdateCoordinator):
 
     async def _async_refresh_and_persist(self) -> None:
         """Refresh tokens and save new values into config entry data."""
-        import time
         access, refresh = await self.hass.async_add_executor_job(
             self.client.refresh_tokens
         )
@@ -79,15 +80,29 @@ class EvolUteCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> dict[str, Any]:
-        import time
-        # Proactive token refresh by configured interval
-        if time.monotonic() - self._last_token_refresh >= self._token_refresh_interval:
-            _LOGGER.debug("Proactive token refresh (interval=%ds)", self._token_refresh_interval)
+        # ----------------------------------------------------------------
+        # Proactive token refresh — runs BEFORE fetching data, but ONLY if
+        # another refresh is not already in progress.  Any failure here is
+        # logged and silently skipped so it never makes sensors unavailable.
+        # ----------------------------------------------------------------
+        if (
+            not self._token_refresh_in_progress
+            and time.monotonic() - self._last_token_refresh >= self._token_refresh_interval
+        ):
+            self._token_refresh_in_progress = True
+            _LOGGER.debug(
+                "Proactive token refresh (interval=%ds)", self._token_refresh_interval
+            )
             try:
                 await self._async_refresh_and_persist()
             except Exception as exc:  # noqa: BLE001
                 _LOGGER.warning("Proactive token refresh failed: %s", exc)
+            finally:
+                self._token_refresh_in_progress = False
 
+        # ----------------------------------------------------------------
+        # Fetch tbox data — retry once with fresh tokens on 401
+        # ----------------------------------------------------------------
         try:
             tbox_raw = await self.hass.async_add_executor_job(
                 self.client.fetch_tbox_info
@@ -106,10 +121,14 @@ class EvolUteCoordinator(DataUpdateCoordinator):
         except EvolUteAPIError as exc:
             raise UpdateFailed(f"Evolute API error: {exc}") from exc
 
-        # Parse tbox payload ― same logic as evolute_api.py
+        # ----------------------------------------------------------------
+        # Parse tbox payload
+        # ----------------------------------------------------------------
         sensors: dict = {}
         position: dict = {}
-        sensors_root: dict = tbox_raw.get("sensors", {}) if isinstance(tbox_raw, dict) else {}
+        sensors_root: dict = (
+            tbox_raw.get("sensors", {}) if isinstance(tbox_raw, dict) else {}
+        )
 
         if isinstance(sensors_root.get("sensorsData"), dict):
             sensors = dict(sensors_root["sensorsData"])
@@ -121,7 +140,9 @@ class EvolUteCoordinator(DataUpdateCoordinator):
             if not isinstance(root, dict):
                 continue
             for key, value in root.items():
-                if key in ("sensorsData", "positionData") or isinstance(value, (dict, list)):
+                if key in ("sensorsData", "positionData") or isinstance(
+                    value, (dict, list)
+                ):
                     continue
                 sensors.setdefault(key, value)
 
@@ -130,7 +151,9 @@ class EvolUteCoordinator(DataUpdateCoordinator):
             ps = root.get("preparation_script") if isinstance(root, dict) else None
             if isinstance(ps, dict):
                 for ps_key, ps_val in ps.items():
-                    sensors[f"preparation_script_{ps_key[0].upper()}{ps_key[1:]}"] = ps_val
+                    sensors[f"preparation_script_{ps_key[0].upper()}{ps_key[1:]}"] = (
+                        ps_val
+                    )
 
         # Alias sensorDataTime
         sensor_time = sensors.get("time")
@@ -138,11 +161,19 @@ class EvolUteCoordinator(DataUpdateCoordinator):
             sensors["sensorDataTime"] = sensor_time
 
         # Position
-        pos_raw = sensors_root.get("positionData") if isinstance(sensors_root, dict) else None
+        pos_raw = (
+            sensors_root.get("positionData")
+            if isinstance(sensors_root, dict)
+            else None
+        )
         if isinstance(pos_raw, dict):
             position = pos_raw
 
-        # Car info (fetched once on first run, cached afterwards)
+        # ----------------------------------------------------------------
+        # Car info — fetched once on first run, cached afterwards.
+        # Preserve previously cached car_info on every subsequent poll so
+        # we never wipe VIN/model from the sensors dict.
+        # ----------------------------------------------------------------
         car_info = (self.data or {}).get("car_info", {})
         if not car_info:
             try:
@@ -153,14 +184,35 @@ class EvolUteCoordinator(DataUpdateCoordinator):
                 car_info = {
                     "vin": raw_car.get("vin"),
                     "carModelName": cm.get("name") if isinstance(cm, dict) else None,
-                    "carModelModname": cm.get("modname") if isinstance(cm, dict) else None,
-                    "carModelYear": cm.get("modelYear") if isinstance(cm, dict) else None,
-                    "carModelColor": cm.get("color") if isinstance(cm, dict) else None,
+                    "carModelModname": (
+                        cm.get("modname") if isinstance(cm, dict) else None
+                    ),
+                    "carModelYear": (
+                        cm.get("modelYear") if isinstance(cm, dict) else None
+                    ),
+                    "carModelColor": (
+                        cm.get("color") if isinstance(cm, dict) else None
+                    ),
                 }
             except Exception as exc:  # noqa: BLE001
                 _LOGGER.warning("Could not fetch car info: %s", exc)
 
         sensors.update({k: v for k, v in car_info.items() if v is not None})
+
+        # ----------------------------------------------------------------
+        # Stale-data guard: if the API returned identical sensor timestamp
+        # as the last successful poll, reuse previous sensors dict wholesale
+        # to avoid spurious state changes caused by partial/empty payloads.
+        # ----------------------------------------------------------------
+        prev_sensors: dict = (self.data or {}).get("sensors", {})
+        new_time = sensors.get("sensorDataTime")
+        prev_time = prev_sensors.get("sensorDataTime")
+
+        if new_time and prev_time and new_time == prev_time:
+            _LOGGER.debug(
+                "sensorDataTime unchanged (%s) — reusing previous sensor values", new_time
+            )
+            sensors = prev_sensors
 
         return {"sensors": sensors, "position": position, "car_info": car_info}
 

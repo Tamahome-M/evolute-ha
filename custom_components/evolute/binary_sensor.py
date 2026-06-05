@@ -82,8 +82,17 @@ class EvolUteBinarySensor(EvolUteEntity, BinarySensorEntity):
         super().__init__(coordinator, description.key)
         self.entity_description = description
         self._attr_name = description.name
+        # Cache the last known good value to suppress single-poll glitches
+        self._last_known_on: bool | None = None
 
     @property
     def is_on(self) -> bool | None:
         val = self.coordinator.sensors.get(self.entity_description.data_key)
-        return None if val is None else self.entity_description.is_on_fn(val)
+        if val is None:
+            # Key absent in current payload — return last known value instead
+            # of flipping to None (unavailable).  HA will still mark the
+            # entity unavailable if the coordinator itself fails.
+            return self._last_known_on
+        result = self.entity_description.is_on_fn(val)
+        self._last_known_on = result
+        return result
