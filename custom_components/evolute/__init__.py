@@ -35,18 +35,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {DATA_COORDINATOR: coordinator}
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    # NOTE: update_listener intentionally NOT registered here.
+    #
+    # Previously we used entry.add_update_listener(_async_update_listener) which
+    # called async_reload() on every entry change — including the programmatic
+    # token-persist writes that the coordinator does every ~10 minutes.  That
+    # caused all entities to flap to "unavailable" for ~1 second on each token
+    # refresh cycle.
+    #
+    # Options-flow changes (scan_interval etc.) are now applied by
+    # async_migrate_entry / a manual reload from the UI if ever needed.
+    # Token rotation is handled entirely in-memory by the coordinator; the
+    # persisted entry is updated for restart-safety but must NOT trigger a
+    # reload.
     return True
-
-
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Перезагрузка при изменении настроек."""
-    new_data = dict(entry.data)
-    for key in (CONF_ACCESS_TOKEN, CONF_REFRESH_TOKEN, CONF_SCAN_INTERVAL):
-        if key in entry.options:
-            new_data[key] = entry.options[key]
-    hass.config_entries.async_update_entry(entry, data=new_data, options={})
-    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
