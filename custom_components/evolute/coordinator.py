@@ -1,6 +1,7 @@
 """DataUpdateCoordinator for Evolute."""
 from __future__ import annotations
 
+import functools
 import logging
 import time
 from datetime import timedelta
@@ -24,6 +25,11 @@ from .const import (
     DEFAULT_TIMEOUT,
     DEFAULT_TOKEN_REFRESH_INTERVAL,
     INTELLIGENT_ACTIONS,
+    COMMAND_TIMEOUT,
+    PREPARE_TIMEOUT,
+    PREPARE_COMMAND,
+    CANCEL_COMMAND,
+    PREPARE_DEFAULTS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,6 +48,9 @@ class EvolUteCoordinator(DataUpdateCoordinator):
         )
         self._last_token_refresh: float = 0.0
         self._token_refresh_in_progress: bool = False
+        # In-memory parameters for the PREPARE (предпрогрев) command. Edited via
+        # the number entities, consumed when the prepare button is pressed.
+        self.prepare_params: dict[str, int] = dict(PREPARE_DEFAULTS)
         self.client = EvolUteClient(
             car_id=entry.data[CONF_CAR_ID],
             access_token=entry.data[CONF_ACCESS_TOKEN],
@@ -232,26 +241,63 @@ class EvolUteCoordinator(DataUpdateCoordinator):
     # Commands
     # ------------------------------------------------------------------
 
+    async def _send_command(
+        self, endpoint: str, value: Any = None, timeout: int = COMMAND_TIMEOUT
+    ) -> None:
+        """POST a command, refreshing tokens once on a 401."""
+        call = functools.partial(
+            self.client.tbox_command, endpoint, value=value, timeout=timeout
+        )
+        try:
+            await self.hass.async_add_executor_job(call)
+        except EvolUteAuthError:
+            await self._async_refresh_and_persist()
+            await self.hass.async_add_executor_job(call)
+
     async def async_send_action(self, action: str) -> None:
-        """Send an intelligent tbox action with skip-if-already logic."""
+        """Send a toggle/push command with skip-if-already logic."""
         if action not in INTELLIGENT_ACTIONS:
             raise ValueError(f"Unknown action: {action}")
 
         endpoint, status_key, skip_if_value = INTELLIGENT_ACTIONS[action]
 
-        current = self.sensors.get(status_key)
-        if current == skip_if_value:
-            _LOGGER.debug("Action '%s' skipped: already in desired state", action)
-            return
+        # Toggle commands flip the state server-side, so don't re-send when we
+        # are already in the desired state. Push commands (status_key is None)
+        # always fire.
+        if status_key is not None:
+            current = self.sensors.get(status_key)
+            if current == skip_if_value:
+                _LOGGER.debug("Action '%s' skipped: already in desired state", action)
+                return
 
-        try:
-            await self.hass.async_add_executor_job(
-                self.client.tbox_command, endpoint
-            )
-        except EvolUteAuthError:
-            await self._async_refresh_and_persist()
-            await self.hass.async_add_executor_job(
-                self.client.tbox_command, endpoint
-            )
+        await self._send_command(endpoint, timeout=COMMAND_TIMEOUT)
+        await self.async_request_refresh()
 
+    # ------------------------------------------------------------------
+    # Preparation (предпрогрев)
+    # ------------------------------------------------------------------
+
+    def _prepare_value(self) -> dict[str, int]:
+        """Build the PREPARE value object from the stored parameters."""
+        p = self.prepare_params
+        return {
+            "flSeatHeating": p["fl"],
+            "frSeatHeating": p["fr"],
+            "rlSeatHeating": p["rl"],
+            "rrSeatHeating": p["rr"],
+            "wheelHeating": p["wheel"],
+            "time": p["time"],
+            "temp": p["temp"],
+        }
+
+    async def async_prepare(self) -> None:
+        """Start preparation with the currently configured temp/time/heating."""
+        await self._send_command(
+            PREPARE_COMMAND, value=self._prepare_value(), timeout=PREPARE_TIMEOUT
+        )
+        await self.async_request_refresh()
+
+    async def async_cancel_prepare(self) -> None:
+        """Cancel a running preparation."""
+        await self._send_command(CANCEL_COMMAND, timeout=PREPARE_TIMEOUT)
         await self.async_request_refresh()

@@ -1,7 +1,9 @@
 """Button platform for Evolute — remote commands."""
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
+from typing import Any
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
@@ -15,19 +17,39 @@ from .entity_base import EvolUteEntity
 
 @dataclass(frozen=True, kw_only=True)
 class _Desc(ButtonEntityDescription):
-    action: str
+    # Coroutine factory to run when the button is pressed.
+    press_fn: Callable[[EvolUteCoordinator], Coroutine[Any, Any, None]]
+
+
+def _action(name: str) -> Callable[[EvolUteCoordinator], Coroutine[Any, Any, None]]:
+    async def _run(coord: EvolUteCoordinator) -> None:
+        await coord.async_send_action(name)
+
+    return _run
 
 
 BUTTONS: tuple[_Desc, ...] = (
-    _Desc(key="heating_on",  action="heating_on",  name="Включить обогрев",   icon="mdi:heat-wave"),
-    _Desc(key="heating_off", action="heating_off", name="Выключить обогрев",  icon="mdi:heat-wave"),
-    _Desc(key="cooling_on",  action="cooling_on",  name="Включить охлаждение",icon="mdi:snowflake"),
-    _Desc(key="cooling_off", action="cooling_off", name="Выключить охлаждение",icon="mdi:snowflake-off"),
-    _Desc(key="prepare_on",  action="prepare_on",  name="Предпрогрев: вкл",   icon="mdi:car-key"),
-    _Desc(key="prepare_off", action="prepare_off", name="Предпрогрев: выкл",  icon="mdi:car-key"),
-    _Desc(key="trunk_open",  action="trunk_open",  name="Открыть багажник",   icon="mdi:car-back"),
-    _Desc(key="trunk_close", action="trunk_close", name="Закрыть багажник",   icon="mdi:car-back"),
-    _Desc(key="blink",       action="blink",       name="Мигнуть фарами",     icon="mdi:car-light-high"),
+    _Desc(key="heating_on",  name="Включить обогрев",     icon="mdi:heat-wave",
+          press_fn=_action("heating_on")),
+    _Desc(key="heating_off", name="Выключить обогрев",    icon="mdi:heat-wave",
+          press_fn=_action("heating_off")),
+    _Desc(key="cooling_on",  name="Включить охлаждение",  icon="mdi:snowflake",
+          press_fn=_action("cooling_on")),
+    _Desc(key="cooling_off", name="Выключить охлаждение", icon="mdi:snowflake-off",
+          press_fn=_action("cooling_off")),
+    _Desc(key="trunk_open",  name="Открыть багажник",     icon="mdi:car-back",
+          press_fn=_action("trunk_open")),
+    _Desc(key="trunk_close", name="Закрыть багажник",     icon="mdi:car-back",
+          press_fn=_action("trunk_close")),
+    _Desc(key="blink",       name="Мигнуть фарами",       icon="mdi:car-light-high",
+          press_fn=_action("blink")),
+    _Desc(key="honk",        name="Сигнал (клаксон)",     icon="mdi:bullhorn",
+          press_fn=_action("honk")),
+    # Preparation (предпрогрев) — uses temp/time/heating from the number entities.
+    _Desc(key="prepare_on",  name="Предпрогрев: вкл",     icon="mdi:car-key",
+          press_fn=lambda c: c.async_prepare()),
+    _Desc(key="prepare_off", name="Предпрогрев: выкл",    icon="mdi:car-key",
+          press_fn=lambda c: c.async_cancel_prepare()),
 )
 
 
@@ -46,4 +68,4 @@ class EvolUteButton(EvolUteEntity, ButtonEntity):
         self._attr_name = description.name
 
     async def async_press(self) -> None:
-        await self.coordinator.async_send_action(self.entity_description.action)
+        await self.entity_description.press_fn(self.coordinator)

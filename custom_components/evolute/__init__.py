@@ -12,7 +12,7 @@ from .frontend import async_register_frontend
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "binary_sensor", "lock", "button", "device_tracker"]
+PLATFORMS = ["sensor", "binary_sensor", "lock", "button", "number", "device_tracker"]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:

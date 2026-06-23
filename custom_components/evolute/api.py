@@ -69,17 +69,22 @@ class EvolUteClient:
         resp.raise_for_status()
         return resp.json()
 
-    def _post(self, url: str, payload: dict | None = None) -> Any:
+    def _post(self, url: str, payload: dict | None = None,
+              timeout: int | None = None) -> Any:
         resp = self._session.post(
             url,
             cookies=self._cookies(),
             json=payload or {},
-            timeout=self.timeout,
+            timeout=timeout or self.timeout,
         )
         if resp.status_code == 401:
             raise EvolUteAuthError("Access denied (401). Tokens expired.")
         resp.raise_for_status()
-        return resp.json()
+        # Command endpoints may legitimately return an empty body.
+        try:
+            return resp.json()
+        except ValueError:
+            return None
 
     def fetch_tbox_info(self) -> dict:
         url = f"{BASE_URL}/car-service/tbox/{self.car_id}/info"
@@ -89,6 +94,16 @@ class EvolUteClient:
         url = f"{BASE_URL}/car-service/car/v2/{self.car_id}"
         return self._get(url)
 
-    def tbox_command(self, endpoint: str, payload: dict | None = None) -> Any:
-        url = f"{BASE_URL}/car-service/tbox/{self.car_id}/{endpoint}"
-        return self._post(url, payload)
+    def tbox_command(self, endpoint: str, value: Any = None,
+                     timeout: int | None = None) -> Any:
+        """Send a remote command.
+
+        Commands go to the versioned endpoint
+        ``/car-service/tbox/v1/{car_id}/{command}``. For ordinary toggle/push
+        commands ``value`` is None and the body is empty (the server flips the
+        state by command name). For PREPARE, ``value`` is the heating/temp/time
+        object and is wrapped as ``{"value": value}`` — exactly like the app.
+        """
+        url = f"{BASE_URL}/car-service/tbox/v1/{self.car_id}/{endpoint}"
+        payload = {} if value is None else {"value": value}
+        return self._post(url, payload, timeout=timeout)
