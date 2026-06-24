@@ -1,7 +1,0 @@
-# Карточка устанавливается автоматически с интеграцией.
-# Добавьте в дашборд через: Редактировать → Добавить карточку → Вручную:
-type: custom:evolute-card
-
-# Если несколько автомобилей — укажите device_id:
-# type: custom:evolute-card
-# device_id: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

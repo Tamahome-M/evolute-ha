@@ -99,7 +99,7 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=_USER_SCHEMA,
             errors=errors,
             description_placeholders={
-                "docs_url": "https://github.com/Tamahome-M/evolute_proxy#как-получить-токены"
+                "docs_url": "https://github.com/Tamahome-M/evolute-ha#как-получить-токены-и-car-id"
             },
         )
 
