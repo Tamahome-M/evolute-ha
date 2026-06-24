@@ -13,6 +13,13 @@ class EvolUteEntity(CoordinatorEntity[EvolUteCoordinator]):
 
     def __init__(self, coordinator: EvolUteCoordinator, unique_suffix: str) -> None:
         super().__init__(coordinator)
+        # Stable English key, stored in the entity registry and exposed to the
+        # frontend via hass.entities[...].translation_key. The Evolute dashboard
+        # card uses it to locate entities regardless of the (localized) name or
+        # the auto-generated entity_id. Does not affect the displayed name,
+        # which subclasses set via _attr_name.
+        self._attr_translation_key = unique_suffix
+
         s = coordinator.sensors
         vin = s.get("vin") or coordinator._entry.data.get("car_id", "unknown")
         model = s.get("carModelName") or "Evolute"
