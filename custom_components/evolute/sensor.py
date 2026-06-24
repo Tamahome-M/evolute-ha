@@ -151,6 +151,14 @@ class EvolUteTimestampSensor(EvolUteSensor):
         if raw is None:
             return None
         try:
-            return datetime.fromtimestamp(int(raw), tz=timezone.utc)
-        except (TypeError, ValueError, OSError):
+            ts = float(raw)
+        except (TypeError, ValueError):
+            return None
+        # The API mixes seconds and milliseconds (e.g. preparation_script uses
+        # ms). Anything past ~year 5138 in seconds is really milliseconds.
+        if ts > 1e11:
+            ts /= 1000.0
+        try:
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
             return None

@@ -41,10 +41,8 @@ BUTTONS: tuple[_Desc, ...] = (
           press_fn=_action("trunk_open")),
     _Desc(key="trunk_close", name="Закрыть багажник",     icon="mdi:car-back",
           press_fn=_action("trunk_close")),
-    _Desc(key="blink",       name="Мигнуть фарами",       icon="mdi:car-light-high",
+    _Desc(key="blink",       name="Сигнал и фары",       icon="mdi:car-light-high",
           press_fn=_action("blink")),
-    _Desc(key="honk",        name="Сигнал (клаксон)",     icon="mdi:bullhorn",
-          press_fn=_action("honk")),
     # Preparation (предпрогрев) — uses temp/time/heating from the number entities.
     _Desc(key="prepare_on",  name="Предпрогрев: вкл",     icon="mdi:car-key",
           press_fn=lambda c: c.async_prepare()),

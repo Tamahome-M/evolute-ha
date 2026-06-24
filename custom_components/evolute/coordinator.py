@@ -160,7 +160,7 @@ class EvolUteCoordinator(DataUpdateCoordinator):
             ps = root.get("preparation_script") if isinstance(root, dict) else None
             if isinstance(ps, dict):
                 for ps_key, ps_val in ps.items():
-                    sensors[f"preparation_script_{ps_key[0].upper()}{ps_key[1:]}"] = (
+                    sensors[f"preparation_script{ps_key[0].upper()}{ps_key[1:]}"] = (
                         ps_val
                     )
 

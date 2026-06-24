@@ -1,32 +1,22 @@
-"""Evolute integration — direct cloud polling, no proxy addon needed."""
+"""Evolute integration — direct cloud polling, no proxy addon needed.
+
+The dashboard card is distributed separately via HACS
+(https://github.com/Tamahome-M/evolute-card) and is intentionally NOT bundled or
+auto-registered here, to avoid a custom-element name clash with the HACS card.
+"""
 from __future__ import annotations
 
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import CoreState, EVENT_HOMEASSISTANT_STARTED, HomeAssistant
+from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, DATA_COORDINATOR, CONF_ACCESS_TOKEN, CONF_REFRESH_TOKEN, CONF_SCAN_INTERVAL
+from .const import DOMAIN, DATA_COORDINATOR
 from .coordinator import EvolUteCoordinator
-from .frontend import async_register_frontend
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "binary_sensor", "lock", "button", "number", "device_tracker"]
-
-
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Регистрируем JS-карточку при старте Home Assistant."""
-
-    async def _register(_event=None) -> None:
-        await async_register_frontend(hass)
-
-    if hass.state == CoreState.running:
-        await _register()
-    else:
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register)
-
-    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -38,17 +28,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # NOTE: update_listener intentionally NOT registered here.
     #
-    # Previously we used entry.add_update_listener(_async_update_listener) which
-    # called async_reload() on every entry change — including the programmatic
-    # token-persist writes that the coordinator does every ~10 minutes.  That
-    # caused all entities to flap to "unavailable" for ~1 second on each token
-    # refresh cycle.
-    #
-    # Options-flow changes (scan_interval etc.) are now applied by
-    # async_migrate_entry / a manual reload from the UI if ever needed.
-    # Token rotation is handled entirely in-memory by the coordinator; the
-    # persisted entry is updated for restart-safety but must NOT trigger a
-    # reload.
+    # Previously we used entry.add_update_listener(...) which called
+    # async_reload() on every entry change — including the programmatic
+    # token-persist writes the coordinator does every ~10 minutes. That caused
+    # all entities to flap to "unavailable" for ~1 second on each token refresh.
+    # Token rotation is handled in-memory; the persisted entry is updated for
+    # restart-safety but must NOT trigger a reload.
     return True
 
 

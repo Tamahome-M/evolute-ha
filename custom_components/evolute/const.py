@@ -37,7 +37,7 @@ PREPARE_TIMEOUT = 60
 #
 #   tuple = (command_name, status_key_in_sensorsData, skip_if_value)
 #
-# status_key None  → never skip (push commands like blink/honk).
+# status_key None  → never skip (push commands like blink).
 INTELLIGENT_ACTIONS = {
     "lock_close": ("centralLockingToggle", "centralLockingStatus", 1),  # пропустить если уже закрыт
     "lock_open":  ("centralLockingToggle", "centralLockingStatus", 0),  # пропустить если уже открыт
@@ -47,8 +47,7 @@ INTELLIGENT_ACTIONS = {
     "cooling_off": ("cooling",  "climateStatus", 0),
     "trunk_open":  ("trunkToggle", "trunkStatus", 1),   # было trunkOpen — несуществующая команда
     "trunk_close": ("trunkToggle", "trunkStatus", 0),
-    "blink":       ("blink", None, None),   # push — мигнуть фарами / поиск
-    "honk":        ("honk",  None, None),   # push — сигнал клаксоном (если поддерживается)
+    "blink":       ("blink", None, None),   # push — сигнал клаксоном + мигание фар («Поиск»)
 }
 
 # --- Preparation (предпрогрев) -------------------------------------------------
