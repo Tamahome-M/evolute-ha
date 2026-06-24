@@ -1,7 +1,7 @@
 {
   "domain": "evolute",
   "name": "Evolute",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "config_flow": true,
   "documentation": "https://github.com/Tamahome-M/evolute-ha",
   "issue_tracker": "https://github.com/Tamahome-M/evolute-ha/issues",
