@@ -27,6 +27,7 @@
     "step": {
       "init": {
         "title": "Evolute Options",
+        "description": "Update the tokens if the integration stops receiving data.",
         "data": {
           "scan_interval": "Sensor polling interval (seconds)",
           "timeout": "API request timeout (seconds)",
