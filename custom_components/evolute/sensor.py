@@ -82,6 +82,8 @@ SENSORS: tuple[_Desc, ...] = (
     _Desc(key="climate_current_temp", data_key="climateCurentTemp", name="Текущая т° климата",
           native_unit_of_measurement=UnitOfTemperature.CELSIUS,
           device_class=SensorDeviceClass.TEMPERATURE, state_class=SensorStateClass.MEASUREMENT),
+    _Desc(key="signal_level", data_key="signalLevel", name="Уровень сигнала",
+          state_class=SensorStateClass.MEASUREMENT, icon="mdi:signal"),
     _Desc(key="diagnostics", data_key="diagnostics", name="Диагностический код",
           icon="mdi:alert-circle-outline"),
     _Desc(key="last_online", data_key="lastOnlineTime", name="Последний онлайн",
