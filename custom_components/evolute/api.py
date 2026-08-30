@@ -208,6 +208,33 @@ def parse_telemetry(raw: Any) -> tuple[dict, dict] | None:
     if "sensorDataTime" not in sensors and raw.get("carStateUpdatedAt"):
         sensors["sensorDataTime"] = raw["carStateUpdatedAt"]
 
+    # Firmware version lives in the firmwareCheck object (actual = reported
+    # by the device, expected = what the server wants; actual is often null).
+    # The flat sensors dict carries a junk boolean "firmwareVersion", hence
+    # the dedicated keys below.
+    fw = raw.get("firmwareCheck")
+    if isinstance(fw, dict):
+        for src_key, dst_key in (
+            ("actual", "firmwareActual"),
+            ("expected", "firmwareExpected"),
+            ("mismatch", "firmwareMismatch"),
+        ):
+            if fw.get(src_key) is not None:
+                sensors[dst_key] = fw[src_key]
+        version = fw.get("actual") or fw.get("expected")
+        if version:
+            sensors["firmwareVersionText"] = version
+
+    # Signal quality in percent: signalLevel is the modem CSQ value
+    # (0–31, 99 = unknown/undetectable). The app renders it as
+    # round(csq / 31 * 100) — e.g. 18 → 58 %, 19 → 61 %.
+    try:
+        csq = int(float(sensors.get("signalLevel")))
+    except (TypeError, ValueError):
+        csq = None
+    if csq is not None and 0 <= csq <= 31:
+        sensors["signalPercent"] = round(csq * 100 / 31)
+
     # Position: telemetry keeps GPS in the flat sensors dict. lat/lon == 0
     # means "no fix / hidden" — leave position empty in that case.
     position: dict = {}
