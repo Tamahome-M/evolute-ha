@@ -8,6 +8,9 @@ CONF_REFRESH_TOKEN = "refresh_token"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_TIMEOUT = "timeout"
 CONF_TOKEN_REFRESH_INTERVAL = "token_refresh_interval"
+# Tbox device id (IMEI) — required by the new client-bff telemetry API.
+# Discovered automatically from API responses and persisted here.
+CONF_DEVICE_ID = "device_id"
 
 DEFAULT_SCAN_INTERVAL = 120
 DEFAULT_TIMEOUT = 20

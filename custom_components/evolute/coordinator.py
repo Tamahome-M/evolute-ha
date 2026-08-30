@@ -11,11 +11,18 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import EvolUteClient, EvolUteAuthError, EvolUteAPIError
+from .api import (
+    EvolUteClient,
+    EvolUteAuthError,
+    EvolUteAPIError,
+    find_device_id,
+    parse_telemetry,
+)
 from .const import (
     DOMAIN,
     DATA_COORDINATOR,
     CONF_CAR_ID,
+    CONF_DEVICE_ID,
     CONF_ACCESS_TOKEN,
     CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL,
@@ -51,6 +58,12 @@ class EvolUteCoordinator(DataUpdateCoordinator):
         # In-memory parameters for the PREPARE (предпрогрев) command. Edited via
         # the number entities, consumed when the prepare button is pressed.
         self.prepare_params: dict[str, int] = dict(PREPARE_DEFAULTS)
+        # Tbox device id (IMEI) — key of the new client-bff telemetry API.
+        # Auto-discovered from API responses and persisted to the entry.
+        self.device_id: str | None = entry.data.get(CONF_DEVICE_ID)
+        self.api_source: str = "tbox"
+        self._raw_car: dict | None = None
+        self._device_id_warned = False
         self.client = EvolUteClient(
             car_id=entry.data[CONF_CAR_ID],
             access_token=entry.data[CONF_ACCESS_TOKEN],
@@ -110,73 +123,121 @@ class EvolUteCoordinator(DataUpdateCoordinator):
                 self._token_refresh_in_progress = False
 
         # ----------------------------------------------------------------
-        # Fetch tbox data — retry once with fresh tokens on 401
+        # New API (client-bff-service/telemetry) — primary source when the
+        # tbox device id (IMEI) is known. Any failure or unexpected payload
+        # falls back to the old tbox API below.
         # ----------------------------------------------------------------
-        try:
-            tbox_raw = await self.hass.async_add_executor_job(
-                self.client.fetch_tbox_info
-            )
-        except EvolUteAuthError:
-            _LOGGER.info("Access token expired — refreshing")
+        used_telemetry = False
+        sensors: dict = {}
+        position: dict = {}
+        tbox_raw: dict | None = None
+
+        if self.device_id:
+            telemetry_raw: Any = None
             try:
-                await self._async_refresh_and_persist()
+                telemetry_raw = await self.hass.async_add_executor_job(
+                    self.client.fetch_telemetry, self.device_id
+                )
+            except EvolUteAuthError:
+                _LOGGER.info("Access token expired — refreshing")
+                try:
+                    await self._async_refresh_and_persist()
+                    telemetry_raw = await self.hass.async_add_executor_job(
+                        self.client.fetch_telemetry, self.device_id
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    _LOGGER.debug("Telemetry retry after refresh failed: %s", exc)
+            except EvolUteAPIError as exc:
+                _LOGGER.debug("Telemetry API request failed: %s", exc)
+
+            parsed = parse_telemetry(telemetry_raw)
+            if parsed is not None:
+                sensors, position = parsed
+                used_telemetry = True
+            elif telemetry_raw is not None:
+                _LOGGER.debug(
+                    "Telemetry API returned an unexpected payload — falling back"
+                )
+
+        # ----------------------------------------------------------------
+        # Old API (tbox) — fallback, and the source for device id discovery
+        # ----------------------------------------------------------------
+        if not used_telemetry:
+            # Fetch tbox data — retry once with fresh tokens on 401
+            try:
                 tbox_raw = await self.hass.async_add_executor_job(
                     self.client.fetch_tbox_info
                 )
-            except EvolUteAuthError as exc:
-                raise UpdateFailed(
-                    "Tokens are invalid. Open integration settings and enter new tokens."
-                ) from exc
-        except EvolUteAPIError as exc:
-            raise UpdateFailed(f"Evolute API error: {exc}") from exc
-
-        # ----------------------------------------------------------------
-        # Parse tbox payload
-        # ----------------------------------------------------------------
-        sensors: dict = {}
-        position: dict = {}
-        sensors_root: dict = (
-            tbox_raw.get("sensors", {}) if isinstance(tbox_raw, dict) else {}
-        )
-
-        if isinstance(sensors_root.get("sensorsData"), dict):
-            sensors = dict(sensors_root["sensorsData"])
-        elif isinstance(sensors_root, dict):
-            sensors = dict(sensors_root)
-
-        # Merge scalar meta fields from top-level and sensors root
-        for root in (tbox_raw, sensors_root):
-            if not isinstance(root, dict):
-                continue
-            for key, value in root.items():
-                if key in ("sensorsData", "positionData") or isinstance(
-                    value, (dict, list)
-                ):
-                    continue
-                sensors.setdefault(key, value)
-
-        # Flatten preparation_script sub-object
-        for root in (tbox_raw, sensors_root):
-            ps = root.get("preparation_script") if isinstance(root, dict) else None
-            if isinstance(ps, dict):
-                for ps_key, ps_val in ps.items():
-                    sensors[f"preparation_script{ps_key[0].upper()}{ps_key[1:]}"] = (
-                        ps_val
+            except EvolUteAuthError:
+                _LOGGER.info("Access token expired — refreshing")
+                try:
+                    await self._async_refresh_and_persist()
+                    tbox_raw = await self.hass.async_add_executor_job(
+                        self.client.fetch_tbox_info
                     )
+                except EvolUteAuthError as exc:
+                    raise UpdateFailed(
+                        "Tokens are invalid. Open integration settings and enter new tokens."
+                    ) from exc
+            except EvolUteAPIError as exc:
+                raise UpdateFailed(f"Evolute API error: {exc}") from exc
 
-        # Alias sensorDataTime
-        sensor_time = sensors.get("time")
-        if sensor_time and "sensorDataTime" not in sensors:
-            sensors["sensorDataTime"] = sensor_time
+            # Parse tbox payload
+            sensors_root: dict = (
+                tbox_raw.get("sensors", {}) if isinstance(tbox_raw, dict) else {}
+            )
 
-        # Position
-        pos_raw = (
-            sensors_root.get("positionData")
-            if isinstance(sensors_root, dict)
-            else None
-        )
-        if isinstance(pos_raw, dict):
-            position = pos_raw
+            if isinstance(sensors_root.get("sensorsData"), dict):
+                sensors = dict(sensors_root["sensorsData"])
+            elif isinstance(sensors_root, dict):
+                sensors = dict(sensors_root)
+
+            # Merge scalar meta fields from top-level and sensors root
+            for root in (tbox_raw, sensors_root):
+                if not isinstance(root, dict):
+                    continue
+                for key, value in root.items():
+                    if key in ("sensorsData", "positionData") or isinstance(
+                        value, (dict, list)
+                    ):
+                        continue
+                    sensors.setdefault(key, value)
+
+            # Flatten preparation_script sub-object
+            for root in (tbox_raw, sensors_root):
+                ps = root.get("preparation_script") if isinstance(root, dict) else None
+                if isinstance(ps, dict):
+                    for ps_key, ps_val in ps.items():
+                        sensors[f"preparation_script{ps_key[0].upper()}{ps_key[1:]}"] = (
+                            ps_val
+                        )
+
+            # Alias sensorDataTime
+            sensor_time = sensors.get("time")
+            if sensor_time and "sensorDataTime" not in sensors:
+                sensors["sensorDataTime"] = sensor_time
+
+            # Position
+            pos_raw = (
+                sensors_root.get("positionData")
+                if isinstance(sensors_root, dict)
+                else None
+            )
+            if isinstance(pos_raw, dict):
+                position = pos_raw
+
+        # Log transitions between the two APIs (once per switch, not per poll)
+        source = "telemetry" if used_telemetry else "tbox"
+        if source != self.api_source:
+            if used_telemetry:
+                _LOGGER.info(
+                    "Данные получаются через новый API (client-bff-service/telemetry)"
+                )
+            else:
+                _LOGGER.warning(
+                    "Новый telemetry API недоступен — использую старый tbox API"
+                )
+            self.api_source = source
 
         # ----------------------------------------------------------------
         # Car info — fetched once on first run, cached afterwards.
@@ -189,6 +250,7 @@ class EvolUteCoordinator(DataUpdateCoordinator):
                 raw_car = await self.hass.async_add_executor_job(
                     self.client.fetch_car_info
                 )
+                self._raw_car = raw_car if isinstance(raw_car, dict) else None
                 cm = raw_car.get("carModel") if isinstance(raw_car, dict) else {}
                 car_info = {
                     "vin": raw_car.get("vin"),
@@ -207,6 +269,31 @@ class EvolUteCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning("Could not fetch car info: %s", exc)
 
         sensors.update({k: v for k, v in car_info.items() if v is not None})
+
+        # ----------------------------------------------------------------
+        # Device id (IMEI) discovery for the new telemetry API. Runs while
+        # unknown; once found it is persisted and the next poll switches to
+        # the new endpoint automatically.
+        # ----------------------------------------------------------------
+        if not self.device_id:
+            found = find_device_id(tbox_raw, self._raw_car)
+            if found:
+                self.device_id = found
+                _LOGGER.info(
+                    "Найден device id тбокса (%s) — со следующего обновления "
+                    "использую новый telemetry API",
+                    found,
+                )
+                self.hass.config_entries.async_update_entry(
+                    self._entry,
+                    data={**self._entry.data, CONF_DEVICE_ID: found},
+                )
+            elif tbox_raw is not None and not self._device_id_warned:
+                self._device_id_warned = True
+                _LOGGER.warning(
+                    "Device id (IMEI) не найден в ответах API — новый telemetry "
+                    "API использоваться не будет, работаю через старый tbox API"
+                )
 
         # ----------------------------------------------------------------
         # Stale-data guard: if the API returned identical sensor timestamp
