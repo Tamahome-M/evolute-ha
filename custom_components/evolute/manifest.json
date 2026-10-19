@@ -1,6 +1,7 @@
 {
   "domain": "evolute",
   "name": "Evolute",
+  "after_dependencies": ["frontend"],
   "codeowners": ["@Tamahome-M"],
   "config_flow": true,
   "dependencies": [],

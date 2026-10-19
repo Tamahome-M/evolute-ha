@@ -10,13 +10,21 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.typing import ConfigType
 
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import EvolUteCoordinator
+from .login_panel import async_ensure_login_panel
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "binary_sensor", "lock", "button", "number", "device_tracker"]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Restore the login panel after Home Assistant restarts."""
+    await async_ensure_login_panel(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
