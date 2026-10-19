@@ -1,4 +1,5 @@
 """Evolute API client — direct access to app.evassist.ru."""
+
 from __future__ import annotations
 
 import logging
@@ -7,31 +8,43 @@ from typing import Any
 
 import requests
 
-from .const import BASE_URL, REFRESH_URL, USER_AGENT, DEFAULT_TIMEOUT
-
+from .const import BASE_URL, DEFAULT_TIMEOUT, LOGIN_URL, REFRESH_URL, USER_AGENT
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class EvolUteAuthError(Exception):
-    """Raised when tokens are invalid and refresh fails."""
+    """Raised when a login code or session is no longer valid."""
 
 
 class EvolUteAPIError(Exception):
     """General API error."""
 
 
+class EvolUteRateLimitError(EvolUteAPIError):
+    """Raised when the service asks the user to wait before retrying."""
+
+
 class EvolUteClient:
     """Low-level HTTP client for evassist.ru."""
 
-    def __init__(self, car_id: str, access_token: str, refresh_token: str,
-                 timeout: int = DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self,
+        car_id: str = "",
+        access_token: str = "",
+        refresh_token: str = "",
+        timeout: int = DEFAULT_TIMEOUT,
+    ) -> None:
         self.car_id = car_id
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.timeout = timeout
         self._session = requests.Session()
-        self._session.headers["User-Agent"] = USER_AGENT
+        self._session.headers.update({"User-Agent": USER_AGENT, "x-app": "web"})
+
+    def close(self) -> None:
+        """Release the HTTP session."""
+        self._session.close()
 
     def _cookies(self) -> dict[str, str]:
         return {
@@ -39,53 +52,124 @@ class EvolUteClient:
             "evy-platform-refresh": self.refresh_token,
         }
 
-    def refresh_tokens(self) -> tuple[str, str]:
-        """Exchange refresh token for a new pair. Returns (access, refresh)."""
+    def _request_json(
+        self,
+        method: str,
+        url: str,
+        payload: dict | None = None,
+        *,
+        timeout: int | None = None,
+        allow_empty: bool = False,
+        auth_statuses: tuple[int, ...] = (401, 403),
+    ) -> Any:
+        """Make a request without exposing credentials in error messages."""
         try:
-            resp = self._session.post(
-                REFRESH_URL,
-                json={"refreshToken": self.refresh_token},
-                timeout=self.timeout,
+            resp = self._session.request(
+                method,
+                url,
+                cookies=self._cookies() if self.access_token else {},
+                json=payload,
+                timeout=timeout or self.timeout,
             )
         except requests.RequestException as exc:
-            raise EvolUteAPIError(f"Network error during token refresh: {exc}") from exc
+            raise EvolUteAPIError("Could not connect to evassist.ru") from exc
 
-        if resp.status_code == 401:
-            raise EvolUteAuthError("Refresh token rejected (401). Re-enter tokens.")
-        if resp.status_code == 403:
-            raise EvolUteAuthError("Refresh token forbidden (403). Re-enter tokens.")
+        if resp.status_code in auth_statuses:
+            raise EvolUteAuthError("Login code or session rejected")
+        if resp.status_code == 429:
+            raise EvolUteRateLimitError("Too many requests; try again later")
         if not resp.ok:
-            raise EvolUteAPIError(f"Token refresh failed: HTTP {resp.status_code}")
-
-        data = resp.json()
-        self.access_token = data["accessToken"]
-        self.refresh_token = data["refreshToken"]
-        _LOGGER.debug("Tokens refreshed successfully")
-        return self.access_token, self.refresh_token
-
-    def _get(self, url: str) -> Any:
-        resp = self._session.get(url, cookies=self._cookies(), timeout=self.timeout)
-        if resp.status_code == 401:
-            raise EvolUteAuthError("Access denied (401). Tokens expired.")
-        resp.raise_for_status()
-        return resp.json()
-
-    def _post(self, url: str, payload: dict | None = None,
-              timeout: int | None = None) -> Any:
-        resp = self._session.post(
-            url,
-            cookies=self._cookies(),
-            json=payload or {},
-            timeout=timeout or self.timeout,
-        )
-        if resp.status_code == 401:
-            raise EvolUteAuthError("Access denied (401). Tokens expired.")
-        resp.raise_for_status()
-        # Command endpoints may legitimately return an empty body.
+            raise EvolUteAPIError(f"Evolute API returned HTTP {resp.status_code}")
         try:
             return resp.json()
-        except ValueError:
-            return None
+        except ValueError as exc:
+            if allow_empty:
+                return None
+            raise EvolUteAPIError("Evolute API returned invalid JSON") from exc
+
+    def _set_tokens(self, data: Any) -> tuple[str, str]:
+        """Validate the complete pair before changing either token."""
+        if not isinstance(data, dict) or any(
+            not isinstance(data.get(key), str) or not data[key].strip()
+            for key in ("accessToken", "refreshToken")
+        ):
+            raise EvolUteAPIError("Evolute API returned an invalid session")
+        self.access_token, self.refresh_token = (
+            data["accessToken"],
+            data["refreshToken"],
+        )
+        # Send exactly the current pair, even when the response also set cookies.
+        self._session.cookies.clear()
+        return self.access_token, self.refresh_token
+
+    def login(self, phone: str, code: str) -> tuple[str, str]:
+        """Sign in with the SMS code requested on the official login page."""
+        return self._set_tokens(
+            self._request_json(
+                "POST",
+                LOGIN_URL,
+                {"phone": phone, "code": code},
+                auth_statuses=(400, 401, 403),
+            )
+        )
+
+    def refresh_tokens(self) -> tuple[str, str]:
+        """Exchange the refresh token for a new session."""
+        tokens = self._set_tokens(
+            self._request_json(
+                "POST",
+                REFRESH_URL,
+                {"refreshToken": self.refresh_token},
+                auth_statuses=(400, 401, 403),
+            )
+        )
+        _LOGGER.debug("Tokens refreshed successfully")
+        return tokens
+
+    def _get(self, url: str) -> Any:
+        return self._request_json("GET", url)
+
+    def _post(
+        self, url: str, payload: dict | None = None, timeout: int | None = None
+    ) -> Any:
+        return self._request_json(
+            "POST",
+            url,
+            payload or {},
+            timeout=timeout,
+            allow_empty=True,
+        )
+
+    def fetch_cars(self) -> list[dict]:
+        """List cars in the personal account using the app's paginated API."""
+        cars: list[dict] = []
+        offset = 0
+        while True:
+            data = self._request_json(
+                "POST",
+                f"{BASE_URL}/car-service/car/v2/search",
+                {"limit": 50, "offset": offset, "addSensors": False, "filters": []},
+            )
+            if (
+                not isinstance(data, dict)
+                or not isinstance(data.get("rows"), list)
+                or type(data.get("total")) is not int
+                or data["total"] < 0
+                or any(
+                    not isinstance(car, dict)
+                    or not isinstance(car.get("_id"), str)
+                    or not car["_id"]
+                    for car in data["rows"]
+                )
+            ):
+                raise EvolUteAPIError("Evolute API returned an invalid car list")
+            rows = data["rows"]
+            cars.extend(rows)
+            offset += len(rows)
+            if offset >= data["total"]:
+                return cars
+            if not rows:
+                raise EvolUteAPIError("Evolute API returned an incomplete car list")
 
     def fetch_tbox_info(self) -> dict:
         url = f"{BASE_URL}/car-service/tbox/{self.car_id}/info"
@@ -122,8 +206,9 @@ class EvolUteClient:
         url = f"{BASE_URL}/car-service/car/v2/{self.car_id}"
         return self._get(url)
 
-    def tbox_command(self, endpoint: str, value: Any = None,
-                     timeout: int | None = None) -> Any:
+    def tbox_command(
+        self, endpoint: str, value: Any = None, timeout: int | None = None
+    ) -> Any:
         """Send a remote command.
 
         Commands go to the versioned endpoint

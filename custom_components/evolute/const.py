@@ -5,6 +5,8 @@ DOMAIN = "evolute"
 CONF_CAR_ID = "car_id"
 CONF_ACCESS_TOKEN = "access_token"
 CONF_REFRESH_TOKEN = "refresh_token"
+CONF_PHONE_NUMBER = "phone_number"
+CONF_SMS_CODE = "sms_code"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_TIMEOUT = "timeout"
 CONF_TOKEN_REFRESH_INTERVAL = "token_refresh_interval"
@@ -25,6 +27,8 @@ USER_AGENT = (
 )
 
 BASE_URL = "https://app.evassist.ru"
+LOGIN_PAGE_URL = f"{BASE_URL}/login"
+LOGIN_URL = f"{BASE_URL}/id-service/auth/sign-in"
 REFRESH_URL = f"{BASE_URL}/id-service/auth/refresh-token"
 
 # Per-request timeouts (seconds) — matches the official app: 20s for normal

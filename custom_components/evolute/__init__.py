@@ -11,7 +11,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, DATA_COORDINATOR
+from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import EvolUteCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,14 +26,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {DATA_COORDINATOR: coordinator}
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # NOTE: update_listener intentionally NOT registered here — reloading on
-    # every programmatic token-persist write made all entities flap to
-    # "unavailable" for ~1s each refresh cycle. Token rotation is in-memory.
+    # Only options changes need a reload. Saving rotated tokens must not
+    # interrupt polling or briefly make all entities unavailable.
+    options = dict(entry.options)
+
+    async def _async_options_updated(hass: HomeAssistant, updated_entry: ConfigEntry):
+        if dict(updated_entry.options) != options:
+            await hass.config_entries.async_reload(updated_entry.entry_id)
+
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        data = hass.data[DOMAIN].pop(entry.entry_id)
+        await hass.async_add_executor_job(data[DATA_COORDINATOR].client.close)
     return unload_ok

@@ -8,6 +8,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check custom_components/evolute/api.py custom_components/evolute/config_flow.py custom_components/evolute/coordinator.py custom_components/evolute/__init__.py custom_components/evolute/const.py tests
+      - run: pytest -q
+
   hacs:
     name: HACS
     runs-on: ubuntu-latest

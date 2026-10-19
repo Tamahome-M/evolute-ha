@@ -2,38 +2,72 @@
   "config": {
     "step": {
       "user": {
-        "title": "Evolute Setup",
-        "description": "Enter your evassist.ru credentials.\n\nGet tokens from browser DevTools → Application → Cookies on app.evassist.ru: copy `evy-platform-access` and `evy-platform-refresh` values.",
+        "title": "Evolute sign-in",
+        "description": "Choose how to sign in to your evassist.ru account.",
+        "menu_options": {
+          "phone": "Phone number and SMS code",
+          "token": "Access and refresh tokens"
+        }
+      },
+      "phone": {
+        "title": "Sign in by phone",
+        "description": "Enter the phone number used in your Evolute account. On the next step, request an SMS code on the official website.",
+        "data": {
+          "phone_number": "Phone number"
+        }
+      },
+      "sms": {
+        "title": "Enter the SMS code",
+        "description": "1. Open the [official login page]({login_url}) in a private browser window.\n2. Enter **{phone_number}**, complete the CAPTCHA and request an SMS code.\n3. Enter the 4-digit code **here in Home Assistant**, without entering it on the website. The code can only be used once.\n\nTo request another code, use the same official page.",
+        "data": {
+          "sms_code": "SMS code"
+        }
+      },
+      "token": {
+        "title": "Sign in with tokens",
+        "description": "Enter the cookies `evy-platform-access` and `evy-platform-refresh` from app.evassist.ru. For a new connection, also enter the car ID from the car page URL.",
         "data": {
           "car_id": "Car ID",
-          "access_token": "Access Token (evy-platform-access)",
-          "refresh_token": "Refresh Token (evy-platform-refresh)",
-          "scan_interval": "Sensor polling interval (seconds)",
-          "timeout": "API request timeout (seconds)",
-          "token_refresh_interval": "Token refresh interval (seconds)"
+          "access_token": "Access token",
+          "refresh_token": "Refresh token"
+        }
+      },
+      "select_car": {
+        "title": "Select your car",
+        "description": "Choose a car from your account. If loading failed, submit this step again to retry without requesting another SMS code.",
+        "data": {
+          "car_id": "Car"
         }
       }
     },
     "error": {
-      "invalid_auth": "Invalid or expired tokens. Get fresh ones from the browser.",
-      "cannot_connect": "Cannot connect to evassist.ru.",
-      "unknown": "Unknown error"
+      "invalid_phone": "Enter a valid phone number with country code, for example +7 999 123-45-67.",
+      "invalid_code": "Enter the 4-digit code from the SMS.",
+      "invalid_car": "Choose a car from the list.",
+      "invalid_auth": "The SMS code is incorrect, expired or already used. Request a new code on the official login page.",
+      "invalid_tokens": "The tokens are invalid or expired. Enter a valid access and refresh token pair.",
+      "cannot_connect": "Cannot connect to evassist.ru or read its response. Try again.",
+      "rate_limited": "Too many requests. Wait before trying again.",
+      "session_expired": "The session expired. Request a new SMS code on the official login page."
     },
     "abort": {
-      "already_configured": "This car is already configured"
+      "already_configured": "This car is already configured.",
+      "no_cars": "No cars were found in this personal account.",
+      "wrong_account": "This account does not have the car being reauthenticated. Sign in to the account that has access to it.",
+      "entry_removed": "The integration entry has been removed.",
+      "reauth_successful": "Sign-in successful.",
+      "reconfigure_successful": "Sign-in details updated."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Evolute Options",
-        "description": "Update the tokens if the integration stops receiving data.",
+        "title": "Evolute options",
+        "description": "Adjust polling and request settings. To sign in again, select Reconfigure in the integration entry menu.",
         "data": {
           "scan_interval": "Sensor polling interval (seconds)",
           "timeout": "API request timeout (seconds)",
-          "token_refresh_interval": "Token refresh interval (seconds)",
-          "access_token": "Access Token (leave unchanged if still valid)",
-          "refresh_token": "Refresh Token (leave unchanged if still valid)"
+          "token_refresh_interval": "Session refresh interval (seconds)"
         }
       }
     }
