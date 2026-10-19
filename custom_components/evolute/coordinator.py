@@ -9,21 +9,22 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import (
-    EvolUteClient,
-    EvolUteAuthError,
     EvolUteAPIError,
+    EvolUteAuthError,
+    EvolUteClient,
     find_device_id,
     parse_telemetry,
 )
 from .const import (
-    DOMAIN,
-    DATA_COORDINATOR,
+    CANCEL_COMMAND,
+    COMMAND_TIMEOUT,
+    CONF_ACCESS_TOKEN,
     CONF_CAR_ID,
     CONF_DEVICE_ID,
-    CONF_ACCESS_TOKEN,
     CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL,
     CONF_TIMEOUT,
@@ -31,12 +32,11 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TIMEOUT,
     DEFAULT_TOKEN_REFRESH_INTERVAL,
+    DOMAIN,
     INTELLIGENT_ACTIONS,
-    COMMAND_TIMEOUT,
-    PREPARE_TIMEOUT,
     PREPARE_COMMAND,
-    CANCEL_COMMAND,
     PREPARE_DEFAULTS,
+    PREPARE_TIMEOUT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,9 +49,12 @@ class EvolUteCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._entry = entry
-        interval = entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-        self._token_refresh_interval: int = entry.data.get(
-            CONF_TOKEN_REFRESH_INTERVAL, DEFAULT_TOKEN_REFRESH_INTERVAL
+        interval = entry.options.get(
+            CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        )
+        self._token_refresh_interval: int = entry.options.get(
+            CONF_TOKEN_REFRESH_INTERVAL,
+            entry.data.get(CONF_TOKEN_REFRESH_INTERVAL, DEFAULT_TOKEN_REFRESH_INTERVAL),
         )
         self._last_token_refresh: float = 0.0
         self._token_refresh_in_progress: bool = False
@@ -68,7 +71,9 @@ class EvolUteCoordinator(DataUpdateCoordinator):
             car_id=entry.data[CONF_CAR_ID],
             access_token=entry.data[CONF_ACCESS_TOKEN],
             refresh_token=entry.data[CONF_REFRESH_TOKEN],
-            timeout=entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT),
+            timeout=entry.options.get(
+                CONF_TIMEOUT, entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
+            ),
         )
         super().__init__(
             hass,
@@ -176,9 +181,11 @@ class EvolUteCoordinator(DataUpdateCoordinator):
                         self.client.fetch_tbox_info
                     )
                 except EvolUteAuthError as exc:
-                    raise UpdateFailed(
-                        "Tokens are invalid. Open integration settings and enter new tokens."
+                    raise ConfigEntryAuthFailed(
+                        "Evolute session expired. Sign in again in the integration settings."
                     ) from exc
+                except EvolUteAPIError as exc:
+                    raise UpdateFailed(f"Evolute API error: {exc}") from exc
             except EvolUteAPIError as exc:
                 raise UpdateFailed(f"Evolute API error: {exc}") from exc
 
