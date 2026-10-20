@@ -9,6 +9,10 @@ const sms = {
   description_placeholders: { phone_number: "+79991234567" }, errors: {},
 };
 const done = { handler: "evolute", type: "create_entry" };
+const phone = {
+  handler: "evolute", type: "form", step_id: "phone", errors: {},
+  data_schema: [{ name: "phone_number", default: "79991234567" }],
+};
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 async function screen(t, responses, { admin = true, url, language = "ru", isolated = false } = {}) {
@@ -46,7 +50,7 @@ async function screen(t, responses, { admin = true, url, language = "ru", isolat
       return typeof next === "function" ? next() : next;
     },
   };
-  const panel = window.document.createElement("evolute-login-panel-v4");
+  const panel = window.document.createElement("evolute-login-panel-v5");
   window.document.body.append(panel);
   panel.hass = hass;
   await flush();
@@ -93,6 +97,46 @@ test("requests SMS without the saved EVAssist login and finishes the same HA flo
   assert.equal(root.querySelector("iframe"), null);
   assert.equal(root.getElementById("sms-code").value, "");
   assert.deepEqual(redirects, ["/config/integrations/integration/evolute"]);
+});
+
+test("submitting the phone immediately opens EVAssist with instructions above it", async (t) => {
+  const { root, calls, submit } = await screen(t, [phone, sms, done]);
+  assert.equal(root.querySelector("iframe"), null);
+  assert.equal(root.getElementById("phone-number").value, "79991234567");
+  assert.equal(root.getElementById("phone-number").disabled, false);
+  assert.equal(root.getElementById("sms-code").disabled, true);
+  root.getElementById("phone-number").value = "+7 (999) 123-45-67";
+  await submit();
+  assert.deepEqual(calls[1], ["POST", "config/config_entries/flow/flow-123", {
+    phone_number: "+7 (999) 123-45-67",
+  }]);
+  assert.equal(root.querySelector("iframe").src, "https://app.evassist.ru/login");
+  const instructions = root.getElementById("instructions");
+  assert.equal(instructions.hidden, false);
+  assert.equal(instructions.parentElement, root.querySelector("main"));
+  assert.equal(instructions.nextElementSibling.id, "status");
+  assert.match(instructions.textContent, /\+79991234567/);
+  assert.equal(root.getElementById("phone-number").disabled, true);
+  assert.equal(root.getElementById("phone-field").hidden, true);
+  assert.equal(root.getElementById("entry").hidden, true);
+  await submit("0123");
+  assert.deepEqual(calls[2][2], { sms_code: "0123" });
+});
+
+test("an invalid phone stays editable without opening EVAssist", async (t) => {
+  const { root, submit } = await screen(t, [phone, {
+    ...phone, errors: { phone_number: "invalid_phone" },
+  }, sms]);
+  root.getElementById("phone-number").value = "123";
+  await submit();
+  assert.equal(root.querySelector("iframe"), null);
+  assert.equal(root.getElementById("phone-number").value, "123");
+  assert.equal(root.getElementById("phone-number").disabled, false);
+  assert.match(root.getElementById("error").textContent, /корректный номер/);
+  root.getElementById("phone-number").value = "+79991234567";
+  await submit();
+  assert.notEqual(root.querySelector("iframe"), null);
+  assert.equal(root.getElementById("error").hidden, true);
 });
 
 test("invalid codes do not reach the backend", async (t) => {
