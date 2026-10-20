@@ -1,7 +1,7 @@
 // Keep the official login page on its own origin; never read its cookies or DOM.
 const LOGIN_URL = "https://app.evassist.ru/login";
 const INTEGRATIONS_URL = "/config/integrations";
-const PANEL_ELEMENT = "evolute-login-panel-v2";
+const PANEL_ELEMENT = "evolute-login-panel-v3";
 
 const TEXT = {
   ru: {
@@ -12,11 +12,14 @@ const TEXT = {
     requestHelp: "Введите номер {phone} в форме ниже, пройдите капчу и запросите СМС. Когда сообщение придёт, нажмите «СМС получено» над формой. Код на странице EVAssist не вводите.",
     received: "СМС получено — ввести код в HA",
     requestAgain: "Запросить новую СМС",
-    recovery: "Уже ввёл код на сайте или вижу автомобили",
-    recoveryHelp: "Код, введённый на сайте EVAssist, уже использован. Перезапустите форму входа и запросите новый код.",
-    sessionHelp: "Если снова видны автомобили, нажмите значок выхода на левой панели сайта рядом с настройками, затем запросите СМС заново.",
+    recovery: "Вижу «Выберите аккаунт», автомобили или уже ввёл код на сайте",
+    recoveryHelp: "Сайт EVAssist может восстановить прежний вход вместо формы телефона. Код, уже введённый на сайте, использован — для Home Assistant нужен новый.",
+    sessionHelp: "Если форма застряла на выборе аккаунта или автомобилях, очистите cookies и данные сайта app.evassist.ru в браузере, включая локальное хранилище, затем перезагрузите эту страницу. Можно также запросить СМС на официальном сайте в приватном окне и вернуться сюда.",
+    isolatedHelp: "Встроенная форма открыта отдельно от сохранённого входа EVAssist. Кнопка ниже перезагрузит эту страницу и начнёт чистую сессию формы. Текущая настройка Home Assistant сохранится.",
     restart: "Перезапустить форму EVAssist",
-    restarted: "Страница EVAssist открыта заново. Запросите новый СМС-код.",
+    reset: "Сбросить встроенный вход",
+    resetting: "Сбрасываем встроенный вход…",
+    restarted: "Страница EVAssist открыта заново. Если выбор аккаунта остался, используйте инструкцию восстановления ниже.",
     finish: "2. Введите код в Home Assistant",
     codeHelp: "Введите код здесь — интеграция получит сессию и найдёт автомобиль. Если код уже использован на сайте, запросите новую СМС кнопкой ниже.",
     code: "СМС-код для {phone}",
@@ -51,11 +54,14 @@ const TEXT = {
     requestHelp: "Enter {phone} below, complete the CAPTCHA and request an SMS. When it arrives, press 'SMS received' above the form. Do not enter the code on the EVAssist page.",
     received: "SMS received — enter the code in HA",
     requestAgain: "Request another SMS",
-    recovery: "I entered the code on the website or see my cars",
-    recoveryHelp: "A code entered on the EVAssist website has already been used. Restart the login form and request another code.",
-    sessionHelp: "If cars are still shown, use the sign-out icon in the website's left sidebar beside settings, then request another SMS.",
+    recovery: "I see 'Choose an account', my cars or entered the code on the website",
+    recoveryHelp: "EVAssist may restore a previous sign-in instead of the phone form. A code entered on the website has already been used — Home Assistant needs a new one.",
+    sessionHelp: "If the form is stuck on account selection or cars, clear cookies and site data for app.evassist.ru in your browser, including local storage, then reload this page. You can also request an SMS on the official website in a private window and return here.",
+    isolatedHelp: "The embedded form is separate from your saved EVAssist sign-in. The button below reloads this page and starts a clean form session. Your current Home Assistant setup is preserved.",
     restart: "Restart the EVAssist form",
-    restarted: "The EVAssist page has been reopened. Request another SMS code.",
+    reset: "Reset the embedded sign-in",
+    resetting: "Resetting the embedded sign-in…",
+    restarted: "The EVAssist page has been reopened. If account selection is still shown, follow the recovery instructions below.",
     finish: "2. Enter the code in Home Assistant",
     codeHelp: "Enter the code here so the integration can sign in and find your car. If you used the code on the website, request another SMS with the button below.",
     code: "SMS code for {phone}",
@@ -92,6 +98,7 @@ class EvoluteLoginPanel extends HTMLElement {
     this._busy = false;
     this._started = false;
     this._smsStage = null;
+    this._isolatedLogin = "credentialless" in document.createElement("iframe");
   }
 
   set hass(hass) {
@@ -197,10 +204,12 @@ class EvoluteLoginPanel extends HTMLElement {
         </div>
       </main>`;
     for (const [id, key] of Object.entries({
-      back: "back", "request-title": "request", "session-help": "sessionHelp",
+      back: "back", "request-title": "request",
+      "session-help": this._isolatedLogin ? "isolatedHelp" : "sessionHelp",
       fallback: "fallback", "fallback-help": "fallbackHelp",
       received: "received", "recovery-title": "recovery", "recovery-help": "recoveryHelp",
-      restart: "restart", "code-help": "codeHelp", "request-again": "requestAgain",
+      restart: this._isolatedLogin ? "reset" : "restart",
+      "code-help": "codeHelp", "request-again": "requestAgain",
     })) this._element(id).textContent = this._text(key);
     this.shadowRoot.querySelector("h1").textContent = this._text("title");
     this._element("status").textContent = this._text("loading");
@@ -314,6 +323,9 @@ class EvoluteLoginPanel extends HTMLElement {
       if (!this._element("frame").firstChild) {
         const frame = document.createElement("iframe");
         frame.title = this._text("request");
+        // EVAssist persists authentication in localStorage. Supporting browsers
+        // give this frame storage separate from the user's saved website login.
+        if (this._isolatedLogin) frame.credentialless = true;
         frame.src = LOGIN_URL;
         frame.referrerPolicy = "no-referrer";
         frame.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin");
@@ -328,6 +340,14 @@ class EvoluteLoginPanel extends HTMLElement {
 
   _restartRequest() {
     if (this._busy || this._step !== "sms") return;
+    if (this._isolatedLogin) {
+      // Credentialless frames share a storage nonce for the top-level document.
+      // Remounting the frame reuses it; reloading HA creates a fresh nonce while
+      // the server-side config flow and HA's own session remain intact.
+      this._message("resetting");
+      window.location.reload();
+      return;
+    }
     this._element("frame").replaceChildren();
     this._element("error").hidden = true;
     this._showSmsStage("request");
