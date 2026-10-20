@@ -11,7 +11,7 @@ const sms = {
 const done = { handler: "evolute", type: "create_entry" };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-async function screen(t, responses, { admin = true, url } = {}) {
+async function screen(t, responses, { admin = true, url, language = "ru" } = {}) {
   const window = new Window({
     url: url || "http://homeassistant.local:8123/evolute-login?flow_id=flow-123",
     settings: { disableIframePageLoading: true, disableJavaScriptFileLoading: true },
@@ -20,7 +20,7 @@ async function screen(t, responses, { admin = true, url } = {}) {
   window.eval(source);
   const calls = [];
   const hass = {
-    language: "ru", user: { is_admin: admin },
+    language, user: { is_admin: admin },
     callApi: async (...args) => {
       calls.push(structuredClone(args));
       const next = responses.shift();
@@ -28,13 +28,16 @@ async function screen(t, responses, { admin = true, url } = {}) {
       return typeof next === "function" ? next() : next;
     },
   };
-  const panel = window.document.createElement("evolute-login-panel");
+  const panel = window.document.createElement("evolute-login-panel-v2");
   window.document.body.append(panel);
   panel.hass = hass;
   await flush();
   const root = panel.shadowRoot;
   const submit = async (code) => {
-    if (code !== undefined) root.getElementById("sms-code").value = code;
+    if (code !== undefined) {
+      if (!root.getElementById("official").hidden) root.getElementById("received").click();
+      root.getElementById("sms-code").value = code;
+    }
     root.querySelector("form").dispatchEvent(new window.Event("submit", { cancelable: true }));
     await flush();
   };
@@ -53,6 +56,14 @@ test("requests SMS in an isolated iframe and finishes the same HA flow", async (
   await flush();
   assert.equal(root.querySelector("iframe"), frame);
   assert.equal(calls.length, 1);
+  assert.equal(root.getElementById("entry").hidden, true);
+  assert.equal(root.getElementById("sms-code").disabled, true);
+  root.getElementById("received").click();
+  assert.equal(root.querySelector("iframe"), null);
+  assert.equal(root.getElementById("official").hidden, true);
+  assert.equal(root.getElementById("entry").hidden, false);
+  assert.equal(root.getElementById("sms-code").disabled, false);
+  assert.equal(root.activeElement, root.getElementById("sms-code"));
   await submit("0123");
   assert.deepEqual(calls, [
     ["GET", "config/config_entries/flow/flow-123"],
@@ -71,13 +82,18 @@ test("invalid codes do not reach the backend", async (t) => {
   assert.match(root.getElementById("error").textContent, /4 цифры/);
 });
 
-test("an incorrect code preserves the official form for another SMS", async (t) => {
+test("an incorrect code lets the user request another SMS in the same flow", async (t) => {
   const { root, submit } = await screen(t, [sms, { ...sms, errors: { base: "invalid_auth" } }, done]);
   const frame = root.querySelector("iframe");
   await submit("1111");
-  assert.equal(root.querySelector("iframe"), frame);
+  assert.equal(root.querySelector("iframe"), null);
   assert.equal(root.getElementById("sms-code").value, "");
   assert.match(root.getElementById("error").textContent, /Код неверный/);
+  root.getElementById("request-again").click();
+  assert.notEqual(root.querySelector("iframe"), frame);
+  assert.equal(root.querySelector("iframe").src, "https://app.evassist.ru/login");
+  assert.equal(root.getElementById("sms-code").disabled, true);
+  assert.equal(root.getElementById("error").hidden, true);
   await submit("2222");
   assert.match(root.getElementById("status").textContent, /подключён/);
 });
@@ -87,7 +103,10 @@ test("double submission sends a one-time code once and supports reauthentication
   const pending = new Promise((resolve) => { finish = resolve; });
   const { root, calls, submit } = await screen(t, [sms, () => pending]);
   await submit("0123");
-  assert.equal(root.querySelector("button").disabled, true);
+  assert.equal(root.getElementById("submit").disabled, true);
+  assert.equal(root.getElementById("request-again").disabled, true);
+  root.getElementById("request-again").click();
+  assert.equal(root.querySelector("iframe"), null);
   await submit("0123");
   assert.equal(calls.length, 2);
   finish({ handler: "evolute", type: "abort", reason: "reauth_successful" });
@@ -123,7 +142,7 @@ test("failed discovery retries without submitting the SMS code again", async (t)
   };
   const { root, calls, submit } = await screen(t, [sms, retry, done]);
   await submit("0123");
-  assert.match(root.querySelector("button").textContent, /Повторить/);
+  assert.match(root.getElementById("submit").textContent, /Повторить/);
   assert.equal(root.getElementById("car-field").hidden, true);
   await submit();
   assert.deepEqual(calls[2][2], {});
@@ -134,6 +153,9 @@ test("requires a Home Assistant administrator before loading the site or flow", 
   assert.equal(calls.length, 0);
   assert.equal(root.querySelector("iframe"), null);
   assert.match(root.getElementById("status").textContent, /администратор/);
+  root.getElementById("received").click();
+  root.getElementById("restart").click();
+  assert.equal(root.querySelector("iframe"), null);
 });
 
 test("does not open an unrelated integration flow", async (t) => {
@@ -150,14 +172,74 @@ test("an expired flow gives a route back to setup", async (t) => {
   assert.match(root.getElementById("back").href, /\/config\/integrations$/);
 });
 
-test("network errors allow retry and keep the provider form mounted", async (t) => {
+test("network errors keep the user on the HA code step", async (t) => {
   const { root, calls, submit } = await screen(t, [sms, new Error("Disconnected"), done]);
-  const frame = root.querySelector("iframe");
   await submit("0123");
-  assert.equal(root.querySelector("iframe"), frame);
-  assert.equal(root.querySelector("button").disabled, false);
+  assert.equal(root.querySelector("iframe"), null);
+  assert.equal(root.getElementById("official").hidden, true);
+  assert.equal(root.getElementById("entry").hidden, false);
+  assert.equal(root.getElementById("submit").disabled, false);
   assert.equal(root.getElementById("sms-code").value, "");
   await submit("4567");
   assert.equal(calls.length, 3);
   assert.match(root.getElementById("status").textContent, /подключён/);
+});
+
+test("restart reopens the official login page without restarting HA setup", async (t) => {
+  const { root, calls } = await screen(t, [sms]);
+  const oldFrame = root.querySelector("iframe");
+  oldFrame.src = "https://app.evassist.ru/car/example";
+  root.getElementById("sms-code").value = "0123";
+  root.getElementById("recovery").open = true;
+  root.getElementById("restart").click();
+  assert.notEqual(root.querySelector("iframe"), oldFrame);
+  assert.equal(root.querySelector("iframe").src, "https://app.evassist.ru/login");
+  assert.equal(root.getElementById("sms-code").value, "");
+  assert.equal(root.getElementById("sms-code").disabled, true);
+  assert.equal(calls.length, 1);
+  assert.match(root.getElementById("instructions").textContent, /\+79991234567/);
+  assert.match(root.getElementById("status").textContent, /открыта заново/);
+});
+
+test("a hidden HA code field cannot submit while requesting an SMS", async (t) => {
+  const { root, calls, submit } = await screen(t, [sms]);
+  root.getElementById("sms-code").value = "0123";
+  await submit();
+  assert.equal(calls.length, 1);
+  assert.equal(root.getElementById("entry").hidden, true);
+  assert.notEqual(root.querySelector("iframe"), null);
+});
+
+test("returning to request another SMS clears the previous code", async (t) => {
+  const { root, calls } = await screen(t, [sms]);
+  root.getElementById("received").click();
+  root.getElementById("sms-code").value = "0123";
+  root.getElementById("request-again").click();
+  assert.equal(root.getElementById("sms-code").value, "");
+  assert.equal(root.getElementById("entry").hidden, true);
+  assert.notEqual(root.querySelector("iframe"), null);
+  root.getElementById("received").click();
+  assert.equal(root.querySelector("iframe"), null);
+  assert.equal(root.getElementById("sms-code").value, "");
+  assert.equal(calls.length, 1);
+});
+
+test("HA updates preserve a partially entered code without remounting the website", async (t) => {
+  const { root, panel, hass, calls } = await screen(t, [sms]);
+  root.getElementById("received").click();
+  root.getElementById("sms-code").value = "01";
+  panel.hass = { ...hass, states: {} };
+  await flush();
+  assert.equal(root.getElementById("sms-code").value, "01");
+  assert.equal(root.querySelector("iframe"), null);
+  assert.equal(root.getElementById("entry").hidden, false);
+  assert.equal(calls.length, 1);
+});
+
+test("recovery controls are localized in English", async (t) => {
+  const { root } = await screen(t, [sms], { language: "en" });
+  assert.match(root.getElementById("recovery-title").textContent, /entered the code/);
+  assert.equal(root.getElementById("restart").textContent, "Restart the EVAssist form");
+  root.getElementById("received").click();
+  assert.equal(root.getElementById("request-again").textContent, "Request another SMS");
 });
