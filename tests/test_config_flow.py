@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import requests
 from homeassistant import config_entries
-from homeassistant.data_entry_flow import FlowResultType, InvalidData
+from homeassistant.data_entry_flow import FlowResultType, InvalidData, UnknownFlow
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.evolute.const import (
@@ -89,22 +89,79 @@ async def test_sms_setup(hass):
     assert CONF_SMS_CODE not in result["data"]
 
 
-async def test_embedded_screen_continues_same_flow(hass):
-    """The panel URL contains only a flow ID and reuses the existing SMS step."""
+@pytest.mark.parametrize(
+    "source",
+    [
+        config_entries.SOURCE_USER,
+        config_entries.SOURCE_REAUTH,
+        config_entries.SOURCE_RECONFIGURE,
+    ],
+)
+async def test_embedded_screen_survives_dialog_closing(hass, source):
+    """HA may close the opening dialog without deleting the panel's SMS flow."""
+    context = {"source": source}
+    entry = None
+    original = {
+        CONF_CAR_ID: "car-1",
+        CONF_ACCESS_TOKEN: "old",
+        CONF_REFRESH_TOKEN: "old-refresh",
+    }
+    if source != config_entries.SOURCE_USER:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            unique_id="car-1",
+            data=original,
+            options={CONF_SCAN_INTERVAL: 240},
+        )
+        entry.add_to_hass(hass)
+        context["entry_id"] = entry.entry_id
     with patch(
         "custom_components.evolute.config_flow.async_ensure_login_panel",
         new_callable=AsyncMock,
         return_value=True,
     ):
-        result = await phone_step(hass, await start(hass))
-    flow_id = result["flow_id"]
+        result = await phone_step(
+            hass, await start(hass, context=context, data=original)
+        )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "continue_in_panel"
+    parent_flow_id = result["flow_id"]
+    flow_type, flow_id = result["next_flow"]
+    assert flow_type == "config_flow"
+    assert flow_id != parent_flow_id
     assert result["description_placeholders"]["login_url"] == (
         f"/evolute-login?flow_id={flow_id}"
     )
+    # The native dialog deletes unfinished flows that it started itself when
+    # an internal link is clicked. This parent is already finished; the child
+    # is continued with continueFlowId and is not owned by that dialog.
+    with pytest.raises(UnknownFlow):
+        hass.config_entries.flow.async_get(parent_flow_id)
+    progress = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert len(progress) == 1
+    assert progress[0]["flow_id"] == flow_id
+    assert progress[0]["context"]["source"] == source
     result = await hass.config_entries.flow.async_configure(flow_id)
     assert result["step_id"] == "sms"
-    result = await sms_step(hass, result)
-    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["description_placeholders"]["phone_number"] == "+79991234567"
+    with patch.object(
+        hass.config_entries, "async_reload", new_callable=AsyncMock
+    ) as reload:
+        result = await sms_step(hass, result)
+    if entry is None:
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+    else:
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == (
+            "reauth_successful"
+            if source == config_entries.SOURCE_REAUTH
+            else "reconfigure_successful"
+        )
+        reload.assert_awaited_once_with(entry.entry_id)
+        assert entry.data[CONF_ACCESS_TOKEN] == "access"
+        assert entry.data[CONF_CAR_ID] == "car-1"
+        assert dict(entry.options) == {CONF_SCAN_INTERVAL: 240}
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
 
 async def test_manual_tokens_still_work(hass, requests_mock):

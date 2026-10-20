@@ -14,7 +14,7 @@ except ImportError:
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, FlowResultType
 from homeassistant.helpers import selector
 
 from .api import (
@@ -184,6 +184,8 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._cars = {}
                 if await async_ensure_login_panel(self.hass):
                     self._embedded_login_url = f"/{PANEL_PATH}?flow_id={self.flow_id}"
+                    if not self.context.get("evolute_panel_login"):
+                        return await self._async_handoff_to_panel()
                 return await self.async_step_sms()
 
         return self.async_show_form(
@@ -199,6 +201,41 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+    async def _async_handoff_to_panel(self) -> FlowResult:
+        """Move login to a continued flow that the opening dialog does not own.
+
+        Home Assistant deletes a dialog-owned flow when an internal link is
+        clicked. Finish that flow before exposing the panel link, preserving
+        the phone number and the original reauth/reconfigure context.
+        """
+        manager = self.hass.config_entries.flow
+        context = {**self.context, "evolute_panel_login": True}
+        initial_data = (
+            self._entry.data
+            if self._entry is not None
+            and context["source"] == config_entries.SOURCE_REAUTH
+            else None
+        )
+        result = await manager.async_init(DOMAIN, context=context, data=initial_data)
+        if result["type"] is FlowResultType.ABORT:
+            return self.async_abort(reason=result["reason"])
+        panel_flow_id = result["flow_id"]
+        await manager.async_configure(panel_flow_id, {"next_step_id": "phone"})
+        await manager.async_configure(
+            panel_flow_id, {CONF_PHONE_NUMBER: self._phone}
+        )
+
+        result = self.async_abort(
+            reason="continue_in_panel",
+            description_placeholders={
+                "login_url": f"/{PANEL_PATH}?flow_id={panel_flow_id}"
+            },
+        )
+        # Newer frontends automatically continue the child flow in the dialog.
+        # Older ones show the link above with the parent already finished.
+        result["next_flow"] = ("config_flow", panel_flow_id)
+        return result
 
     def _show_sms_form(self, errors: dict[str, str]) -> FlowResult:
         return self.async_show_form(
