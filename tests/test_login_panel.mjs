@@ -30,6 +30,10 @@ async function screen(t, responses, { admin = true, url, language = "ru", isolat
   Object.defineProperty(window.location, "reload", {
     value: () => reloads.push(window.location.href),
   });
+  const redirects = [];
+  Object.defineProperty(window.location, "replace", {
+    value: (url) => redirects.push(url),
+  });
   window.localStorage.setItem("hass-session", "preserved");
   window.eval(source);
   const calls = [];
@@ -42,7 +46,7 @@ async function screen(t, responses, { admin = true, url, language = "ru", isolat
       return typeof next === "function" ? next() : next;
     },
   };
-  const panel = window.document.createElement("evolute-login-panel-v3");
+  const panel = window.document.createElement("evolute-login-panel-v4");
   window.document.body.append(panel);
   panel.hass = hass;
   await flush();
@@ -55,11 +59,11 @@ async function screen(t, responses, { admin = true, url, language = "ru", isolat
     root.querySelector("form").dispatchEvent(new window.Event("submit", { cancelable: true }));
     await flush();
   };
-  return { panel, root, calls, hass, submit, reloads, window };
+  return { panel, root, calls, hass, submit, reloads, redirects, window };
 }
 
 test("requests SMS without the saved EVAssist login and finishes the same HA flow", async (t) => {
-  const { root, calls, panel, hass, submit } = await screen(t, [sms, done], { isolated: true });
+  const { root, calls, panel, hass, submit, redirects } = await screen(t, [sms, done], { isolated: true });
   const frame = root.querySelector("iframe");
   assert.equal(frame.src, "https://app.evassist.ru/login");
   assert.equal(frame.referrerPolicy, "no-referrer");
@@ -79,6 +83,7 @@ test("requests SMS without the saved EVAssist login and finishes the same HA flo
   assert.equal(root.getElementById("entry").hidden, false);
   assert.equal(root.getElementById("sms-code").disabled, false);
   assert.equal(root.activeElement, root.getElementById("sms-code"));
+  assert.deepEqual(redirects, []);
   await submit("0123");
   assert.deepEqual(calls, [
     ["GET", "config/config_entries/flow/flow-123"],
@@ -87,14 +92,16 @@ test("requests SMS without the saved EVAssist login and finishes the same HA flo
   assert.match(root.getElementById("status").textContent, /подключён/);
   assert.equal(root.querySelector("iframe"), null);
   assert.equal(root.getElementById("sms-code").value, "");
+  assert.deepEqual(redirects, ["/config/integrations/integration/evolute"]);
 });
 
 test("invalid codes do not reach the backend", async (t) => {
-  const { calls, root, submit } = await screen(t, [sms]);
+  const { calls, root, submit, redirects } = await screen(t, [sms]);
   await submit("12a3");
   assert.equal(calls.length, 1);
   assert.equal(root.getElementById("error").hidden, false);
   assert.match(root.getElementById("error").textContent, /4 цифры/);
+  assert.deepEqual(redirects, []);
 });
 
 test("an incorrect code lets the user request another SMS in the same flow", async (t) => {
@@ -116,7 +123,7 @@ test("an incorrect code lets the user request another SMS in the same flow", asy
 test("double submission sends a one-time code once and supports reauthentication", async (t) => {
   let finish;
   const pending = new Promise((resolve) => { finish = resolve; });
-  const { root, calls, submit } = await screen(t, [sms, () => pending]);
+  const { root, calls, submit, redirects } = await screen(t, [sms, () => pending]);
   await submit("0123");
   assert.equal(root.getElementById("submit").disabled, true);
   assert.equal(root.getElementById("request-again").disabled, true);
@@ -124,10 +131,12 @@ test("double submission sends a one-time code once and supports reauthentication
   assert.equal(root.querySelector("iframe"), null);
   await submit("0123");
   assert.equal(calls.length, 2);
+  assert.deepEqual(redirects, []);
   finish({ handler: "evolute", type: "abort", reason: "reauth_successful" });
   await flush();
   assert.match(root.getElementById("status").textContent, /обновлено/);
   assert.equal(root.querySelector("iframe"), null);
+  assert.deepEqual(redirects, ["/config/integrations/integration/evolute"]);
 });
 
 test("car selection uses the serialized HA schema and treats labels as text", async (t) => {
@@ -137,7 +146,7 @@ test("car selection uses the serialized HA schema and treats labels as text", as
       ["one", "i-JOY"], ["two", "<img src=x onerror=alert(1)>"],
     ] }],
   };
-  const { root, calls, submit } = await screen(t, [sms, cars, done]);
+  const { root, calls, submit, redirects } = await screen(t, [sms, cars, done]);
   await submit("0123");
   assert.equal(root.querySelector("iframe"), null);
   const select = root.getElementById("car-id");
@@ -145,9 +154,11 @@ test("car selection uses the serialized HA schema and treats labels as text", as
   assert.equal(select.options[1].textContent, "<img src=x onerror=alert(1)>");
   assert.equal(root.querySelector("img"), null);
   assert.equal(root.getElementById("sms-code").disabled, true);
+  assert.deepEqual(redirects, []);
   select.value = "two";
   await submit();
   assert.deepEqual(calls[2][2], { car_id: "two" });
+  assert.deepEqual(redirects, ["/config/integrations/integration/evolute"]);
 });
 
 test("failed discovery retries without submitting the SMS code again", async (t) => {
@@ -155,12 +166,14 @@ test("failed discovery retries without submitting the SMS code again", async (t)
     handler: "evolute", type: "form", step_id: "select_car",
     data_schema: [], errors: { base: "cannot_connect" },
   };
-  const { root, calls, submit } = await screen(t, [sms, retry, done]);
+  const { root, calls, submit, redirects } = await screen(t, [sms, retry, done]);
   await submit("0123");
   assert.match(root.getElementById("submit").textContent, /Повторить/);
   assert.equal(root.getElementById("car-field").hidden, true);
+  assert.deepEqual(redirects, []);
   await submit();
   assert.deepEqual(calls[2][2], {});
+  assert.deepEqual(redirects, ["/config/integrations/integration/evolute"]);
 });
 
 test("requires a Home Assistant administrator before loading the site or flow", async (t) => {
@@ -181,10 +194,11 @@ test("does not open an unrelated integration flow", async (t) => {
 });
 
 test("an expired flow gives a route back to setup", async (t) => {
-  const { root } = await screen(t, [new Error("Not found")]);
+  const { root, redirects } = await screen(t, [new Error("Not found")]);
   assert.equal(root.querySelector("iframe"), null);
   assert.match(root.getElementById("status").textContent, /начните вход заново/);
   assert.match(root.getElementById("back").href, /\/config\/integrations$/);
+  assert.deepEqual(redirects, []);
 });
 
 test("network errors keep the user on the HA code step", async (t) => {

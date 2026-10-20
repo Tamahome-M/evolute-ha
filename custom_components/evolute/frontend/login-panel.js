@@ -1,7 +1,8 @@
 // Keep the official login page on its own origin; never read its cookies or DOM.
 const LOGIN_URL = "https://app.evassist.ru/login";
 const INTEGRATIONS_URL = "/config/integrations";
-const PANEL_ELEMENT = "evolute-login-panel-v3";
+const EVOLUTE_SETTINGS_URL = `${INTEGRATIONS_URL}/integration/evolute`;
+const PANEL_ELEMENT = "evolute-login-panel-v4";
 
 const TEXT = {
   ru: {
@@ -246,18 +247,27 @@ class EvoluteLoginPanel extends HTMLElement {
     this._element("error").hidden = true;
   }
 
+  _complete(key) {
+    this._message(key);
+    // Replace the completed flow URL so Back cannot reopen the expired form.
+    window.location.replace(EVOLUTE_SETTINGS_URL);
+  }
+
   _accept(result) {
     if (result.handler !== "evolute") {
       this._message("unavailable");
       return;
     }
     if (result.type === "create_entry") {
-      this._message("done");
+      this._complete("done");
       return;
     }
     if (result.type === "abort") {
-      this._message(["reauth_successful", "reconfigure_successful"].includes(result.reason)
-        ? "recovered" : result.reason);
+      if (["reauth_successful", "reconfigure_successful"].includes(result.reason)) {
+        this._complete("recovered");
+      } else {
+        this._message(result.reason);
+      }
       return;
     }
     if (result.type !== "form" || !["sms", "select_car"].includes(result.step_id)) {
