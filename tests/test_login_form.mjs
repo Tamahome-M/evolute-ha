@@ -78,6 +78,16 @@ test("HA state updates preserve the iframe and CAPTCHA session", async (t) => {
   assert.equal(root.querySelector("iframe"), frame);
 });
 
+test("Enter on recovery controls cannot submit the native HA form", async (t) => {
+  const { root, window } = await field(t);
+  let submissions = 0;
+  window.document.body.addEventListener("keydown", () => { submissions += 1; });
+  for (const control of root.querySelectorAll("summary, button, a")) {
+    control.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, composed: true }));
+  }
+  assert.equal(submissions, 0);
+});
+
 test("switching to the code step removes the website and leaves phone/code to HA", async (t) => {
   const { element, root } = await field(t);
   const frame = root.querySelector("iframe");

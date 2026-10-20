@@ -35,10 +35,8 @@
       this._busy = false;
       this._disabled = false;
       this._onFlowUpdate = this._onFlowUpdate.bind(this);
-      // Enter on a recovery button must not also submit HA's credential form.
-      this.shadowRoot.addEventListener("keydown", (event) => {
-        if (event.target instanceof HTMLButtonElement) event.stopPropagation();
-      });
+      // Keyboard activation of recovery controls must not submit HA's form.
+      this.shadowRoot.addEventListener("keydown", (event) => event.stopPropagation());
     }
 
     set hass(value) { this._hass = value; this._render(); }
