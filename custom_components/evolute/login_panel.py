@@ -13,6 +13,8 @@ from .const import DOMAIN
 
 PANEL_PATH = "evolute-login"
 SCRIPT_URL = "/evolute_static/login-panel.js"
+PANEL_ELEMENT = "evolute-login-panel-v2"
+PANEL_MODULE_URL = f"{SCRIPT_URL}?v=2"
 _SETUP_TASK = f"{DOMAIN}_login_panel_setup"
 _STATIC_REGISTERED = f"{DOMAIN}_login_panel_static"
 _LOGGER = logging.getLogger(__name__)
@@ -55,7 +57,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_PATH,
-        webcomponent_name="evolute-login-panel",
-        module_url=SCRIPT_URL,
+        webcomponent_name=PANEL_ELEMENT,
+        module_url=PANEL_MODULE_URL,
         require_admin=True,
     )

@@ -18,7 +18,7 @@
       },
       "sms": {
         "title": "Enter the SMS code",
-        "description": "Open the [sign-in screen]({login_url}) to request an SMS for **{phone_number}** and enter the code there. The official form and Home Assistant code field are shown on the same screen.\n\nIf the embedded page does not work, open the [official login page]({official_login_url}) in a private browser window, enter the same number, complete the CAPTCHA and request an SMS. Enter the 4-digit code here in Home Assistant, without entering it on the website. The code can only be used once.",
+        "description": "Open the [sign-in screen]({login_url}) and request an SMS for **{phone_number}**. Then press \"SMS received\": the official page will close and the Home Assistant code field will appear. Do not enter the code on the EVAssist page.\n\nIf the embedded page does not work, open the [official login page]({official_login_url}) in a private window, enter the same number, complete the CAPTCHA and request an SMS. Enter the code here in Home Assistant, without entering it on the website. If you already used the code, request another one.",
         "data": {
           "sms_code": "SMS code"
         }
@@ -57,7 +57,7 @@
       "entry_removed": "The integration entry has been removed.",
       "reauth_successful": "Sign-in successful.",
       "reconfigure_successful": "Sign-in details updated.",
-      "continue_in_panel": "Continue [signing in on the embedded Home Assistant screen]({login_url}). Your phone number has been carried over; request an SMS in the official form and enter the code in the Home Assistant field."
+      "continue_in_panel": "Continue [signing in on the embedded Home Assistant screen]({login_url}). Your phone number has been carried over: request an SMS in the official form, press \"SMS received\" and enter the code on the next Home Assistant step."
     }
   },
   "options": {
