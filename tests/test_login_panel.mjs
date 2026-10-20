@@ -11,12 +11,26 @@ const sms = {
 const done = { handler: "evolute", type: "create_entry" };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-async function screen(t, responses, { admin = true, url, language = "ru" } = {}) {
+async function screen(t, responses, { admin = true, url, language = "ru", isolated = false } = {}) {
   const window = new Window({
     url: url || "http://homeassistant.local:8123/evolute-login?flow_id=flow-123",
     settings: { disableIframePageLoading: true, disableJavaScriptFileLoading: true },
   });
   t.after(() => window.happyDOM.close());
+  if (isolated) {
+    Object.defineProperty(window.HTMLIFrameElement.prototype, "credentialless", {
+      configurable: true,
+      get() { return this.hasAttribute("credentialless"); },
+      set(value) { this.toggleAttribute("credentialless", Boolean(value)); },
+    });
+  } else {
+    delete window.HTMLIFrameElement.prototype.credentialless;
+  }
+  const reloads = [];
+  Object.defineProperty(window.location, "reload", {
+    value: () => reloads.push(window.location.href),
+  });
+  window.localStorage.setItem("hass-session", "preserved");
   window.eval(source);
   const calls = [];
   const hass = {
@@ -28,7 +42,7 @@ async function screen(t, responses, { admin = true, url, language = "ru" } = {})
       return typeof next === "function" ? next() : next;
     },
   };
-  const panel = window.document.createElement("evolute-login-panel-v2");
+  const panel = window.document.createElement("evolute-login-panel-v3");
   window.document.body.append(panel);
   panel.hass = hass;
   await flush();
@@ -41,14 +55,15 @@ async function screen(t, responses, { admin = true, url, language = "ru" } = {})
     root.querySelector("form").dispatchEvent(new window.Event("submit", { cancelable: true }));
     await flush();
   };
-  return { panel, root, calls, hass, submit };
+  return { panel, root, calls, hass, submit, reloads, window };
 }
 
-test("requests SMS in an isolated iframe and finishes the same HA flow", async (t) => {
-  const { root, calls, panel, hass, submit } = await screen(t, [sms, done]);
+test("requests SMS without the saved EVAssist login and finishes the same HA flow", async (t) => {
+  const { root, calls, panel, hass, submit } = await screen(t, [sms, done], { isolated: true });
   const frame = root.querySelector("iframe");
   assert.equal(frame.src, "https://app.evassist.ru/login");
   assert.equal(frame.referrerPolicy, "no-referrer");
+  assert.equal(frame.credentialless, true);
   assert.equal(frame.getAttribute("sandbox"), "allow-scripts allow-forms allow-same-origin");
   assert.match(root.getElementById("instructions").textContent, /\+79991234567/);
   assert.equal(root.getElementById("back").target, "");
@@ -186,9 +201,10 @@ test("network errors keep the user on the HA code step", async (t) => {
 });
 
 test("restart reopens the official login page without restarting HA setup", async (t) => {
-  const { root, calls } = await screen(t, [sms]);
+  const { root, calls, reloads } = await screen(t, [sms]);
   const oldFrame = root.querySelector("iframe");
-  oldFrame.src = "https://app.evassist.ru/car/example";
+  assert.equal(oldFrame.hasAttribute("credentialless"), false);
+  oldFrame.src = "https://app.evassist.ru/pick-organization";
   root.getElementById("sms-code").value = "0123";
   root.getElementById("recovery").open = true;
   root.getElementById("restart").click();
@@ -197,8 +213,42 @@ test("restart reopens the official login page without restarting HA setup", asyn
   assert.equal(root.getElementById("sms-code").value, "");
   assert.equal(root.getElementById("sms-code").disabled, true);
   assert.equal(calls.length, 1);
+  assert.equal(reloads.length, 0);
   assert.match(root.getElementById("instructions").textContent, /\+79991234567/);
   assert.match(root.getElementById("status").textContent, /открыта заново/);
+  assert.match(root.getElementById("session-help").textContent, /локальное хранилище/);
+  assert.match(root.getElementById("session-help").textContent, /приватном окне/);
+  assert.doesNotMatch(root.getElementById("session-help").textContent, /значок выхода/);
+});
+
+test("reset reloads the top-level page to discard the credentialless session", async (t) => {
+  const { root, calls, reloads, window } = await screen(t, [sms], { isolated: true });
+  root.querySelector("iframe").src = "https://app.evassist.ru/pick-organization";
+  root.getElementById("sms-code").value = "0123";
+  assert.equal(root.getElementById("restart").textContent, "Сбросить встроенный вход");
+  assert.match(root.getElementById("session-help").textContent, /перезагрузит эту страницу/);
+  root.getElementById("restart").click();
+  assert.deepEqual(reloads, ["http://homeassistant.local:8123/evolute-login?flow_id=flow-123"]);
+  assert.equal(root.querySelector("iframe"), null);
+  assert.equal(root.getElementById("sms-code").value, "");
+  assert.equal(calls.length, 1);
+  assert.equal(window.localStorage.getItem("hass-session"), "preserved");
+  assert.match(root.getElementById("status").textContent, /Сбрасываем/);
+  root.getElementById("restart").click();
+  assert.equal(reloads.length, 1);
+});
+
+test("requesting another SMS discards the isolated session after a used code", async (t) => {
+  const { root, calls, reloads, submit } = await screen(t, [
+    sms, { ...sms, errors: { base: "invalid_auth" } },
+  ], { isolated: true });
+  await submit("0123");
+  assert.equal(root.querySelector("iframe"), null);
+  root.getElementById("request-again").click();
+  assert.equal(reloads.length, 1);
+  assert.equal(new URL(reloads[0]).searchParams.get("flow_id"), "flow-123");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1][2], { sms_code: "0123" });
 });
 
 test("a hidden HA code field cannot submit while requesting an SMS", async (t) => {
@@ -242,4 +292,13 @@ test("recovery controls are localized in English", async (t) => {
   assert.equal(root.getElementById("restart").textContent, "Restart the EVAssist form");
   root.getElementById("received").click();
   assert.equal(root.getElementById("request-again").textContent, "Request another SMS");
+});
+
+test("isolated recovery is localized in English", async (t) => {
+  const { root, reloads } = await screen(t, [sms], { language: "en", isolated: true });
+  assert.equal(root.getElementById("restart").textContent, "Reset the embedded sign-in");
+  assert.match(root.getElementById("session-help").textContent, /clean form session/);
+  root.getElementById("restart").click();
+  assert.equal(reloads.length, 1);
+  assert.equal(root.getElementById("status").textContent, "Resetting the embedded sign-in…");
 });
