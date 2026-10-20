@@ -174,6 +174,12 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, step_id: str, user_input: dict | None
     ) -> FlowResult:
         errors: dict[str, str] = {}
+        if (
+            user_input is None
+            and not self.context.get("evolute_panel_login")
+            and await async_ensure_login_panel(self.hass)
+        ):
+            return await self._async_handoff_to_panel()
         if user_input is not None:
             try:
                 self._phone = _normalize_phone(user_input[CONF_PHONE_NUMBER])
@@ -185,7 +191,7 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if await async_ensure_login_panel(self.hass):
                     self._embedded_login_url = f"/{PANEL_PATH}?flow_id={self.flow_id}"
                     if not self.context.get("evolute_panel_login"):
-                        return await self._async_handoff_to_panel()
+                        return await self._async_handoff_to_panel(self._phone)
                 return await self.async_step_sms()
 
         return self.async_show_form(
@@ -202,12 +208,13 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def _async_handoff_to_panel(self) -> FlowResult:
+    async def _async_handoff_to_panel(self, phone: str | None = None) -> FlowResult:
         """Move login to a continued flow that the opening dialog does not own.
 
         Home Assistant deletes a dialog-owned flow when an internal link is
         clicked. Finish that flow before exposing the panel link, preserving
-        the phone number and the original reauth/reconfigure context.
+        the original reauth/reconfigure context. The panel collects the phone
+        number itself, or carries it over when resuming an older native form.
         """
         manager = self.hass.config_entries.flow
         context = {**self.context, "evolute_panel_login": True}
@@ -222,9 +229,8 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason=result["reason"])
         panel_flow_id = result["flow_id"]
         await manager.async_configure(panel_flow_id, {"next_step_id": "phone"})
-        await manager.async_configure(
-            panel_flow_id, {CONF_PHONE_NUMBER: self._phone}
-        )
+        if phone is not None:
+            await manager.async_configure(panel_flow_id, {CONF_PHONE_NUMBER: phone})
 
         result = self.async_abort(
             reason="continue_in_panel",
@@ -232,9 +238,8 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "login_url": f"/{PANEL_PATH}?flow_id={panel_flow_id}"
             },
         )
-        # Newer frontends automatically continue the child flow in the dialog.
-        # Older ones show the link above with the parent already finished.
-        result["next_flow"] = ("config_flow", panel_flow_id)
+        # The frontend handoff opens the panel in this tab. Do not chain the
+        # native SMS form: it would add an intermediate screen before the panel.
         return result
 
     def _show_sms_form(self, errors: dict[str, str]) -> FlowResult:

@@ -2,15 +2,19 @@
 const LOGIN_URL = "https://app.evassist.ru/login";
 const INTEGRATIONS_URL = "/config/integrations";
 const EVOLUTE_SETTINGS_URL = `${INTEGRATIONS_URL}/integration/evolute`;
-const PANEL_ELEMENT = "evolute-login-panel-v4";
+const PANEL_ELEMENT = "evolute-login-panel-v5";
 
 const TEXT = {
   ru: {
     title: "Вход в Evolute",
     back: "Настройки интеграций",
     loading: "Загрузка настройки…",
+    phoneTitle: "Вход по номеру телефона",
+    phoneHelp: "Укажите номер телефона аккаунта Evolute.",
+    phone: "Номер телефона",
+    next: "Продолжить",
     request: "1. Запросите СМС",
-    requestHelp: "Введите номер {phone} в форме ниже, пройдите капчу и запросите СМС. Когда сообщение придёт, нажмите «СМС получено» над формой. Код на странице EVAssist не вводите.",
+    requestHelp: "Введите номер {phone} в официальной форме ниже, пройдите капчу и запросите СМС. Когда сообщение придёт, нажмите «СМС получено — ввести код в HA». Официальная страница закроется, и появится поле для кода Home Assistant. Код на странице EVAssist не вводите: он одноразовый.",
     received: "СМС получено — ввести код в HA",
     requestAgain: "Запросить новую СМС",
     recovery: "Вижу «Выберите аккаунт», автомобили или уже ввёл код на сайте",
@@ -37,6 +41,7 @@ const TEXT = {
     unavailable: "Эта настройка закрыта или уже завершена. Откройте Evolute в настройках интеграций и начните вход заново.",
     failed: "Не удалось продолжить настройку. Проверьте соединение и повторите попытку.",
     invalid_code: "Введите 4 цифры из СМС.",
+    invalid_phone: "Введите корректный номер с кодом страны, например +7 999 123-45-67.",
     invalid_auth: "Код неверный, истёк или уже использован. Проверьте код или нажмите «Запросить новую СМС».",
     rate_limited: "Слишком много запросов. Подождите и попробуйте снова.",
     cannot_connect: "Не удалось связаться с EVAssist. Повторите попытку.",
@@ -51,8 +56,12 @@ const TEXT = {
     title: "Sign in to Evolute",
     back: "Integration settings",
     loading: "Loading setup…",
+    phoneTitle: "Sign in by phone",
+    phoneHelp: "Enter the phone number used in your Evolute account.",
+    phone: "Phone number",
+    next: "Continue",
     request: "1. Request an SMS",
-    requestHelp: "Enter {phone} below, complete the CAPTCHA and request an SMS. When it arrives, press 'SMS received' above the form. Do not enter the code on the EVAssist page.",
+    requestHelp: "Enter {phone} in the official form below, complete the CAPTCHA and request an SMS. When it arrives, press 'SMS received — enter the code in HA'. The official page will close and the Home Assistant code field will appear. Do not enter the code on the EVAssist page: it can only be used once.",
     received: "SMS received — enter the code in HA",
     requestAgain: "Request another SMS",
     recovery: "I see 'Choose an account', my cars or entered the code on the website",
@@ -79,6 +88,7 @@ const TEXT = {
     unavailable: "This setup was closed or has already finished. Open Evolute in integration settings and start signing in again.",
     failed: "Unable to continue setup. Check your connection and try again.",
     invalid_code: "Enter the 4 digits from the SMS.",
+    invalid_phone: "Enter a valid phone number with country code, for example +7 999 123-45-67.",
     invalid_auth: "The code is incorrect, expired or already used. Check the code or press 'Request another SMS'.",
     rate_limited: "Too many requests. Wait and try again.",
     cannot_connect: "Cannot connect to EVAssist. Try again.",
@@ -155,6 +165,7 @@ class EvoluteLoginPanel extends HTMLElement {
         input, select, button { font: inherit; padding: 12px; border-radius: 8px; }
         input, select { width: 100%; color: inherit; background: var(--secondary-background-color, #fafafa); border: 1px solid var(--divider-color, #bbb); }
         input { font-size: 22px; letter-spacing: 6px; }
+        #phone-number { font-size: 18px; letter-spacing: normal; }
         button { margin-top: 16px; border: 0; background: var(--primary-color, #03a9f4); color: var(--text-primary-color, white); cursor: pointer; }
         button:disabled { opacity: .6; cursor: wait; }
         button.secondary { background: transparent; color: var(--primary-color, #03a9f4); border: 1px solid var(--divider-color, #ddd); }
@@ -174,11 +185,12 @@ class EvoluteLoginPanel extends HTMLElement {
       </style>
       <header><a href="${INTEGRATIONS_URL}" id="back"></a><h1></h1></header>
       <main>
+        <p id="instructions" hidden></p>
         <p id="status" role="status"></p>
         <p id="error" role="alert" hidden></p>
         <div class="columns" hidden>
           <section id="official">
-            <h2 id="request-title"></h2><p id="instructions"></p>
+            <h2 id="request-title"></h2>
             <button id="received" type="button"></button>
             <div id="frame"></div>
             <details id="recovery">
@@ -191,8 +203,12 @@ class EvoluteLoginPanel extends HTMLElement {
           </section>
           <section id="entry">
             <h2 id="form-title"></h2>
+            <p id="phone-help" hidden></p>
             <p id="code-help"></p>
             <form>
+              <div id="phone-field" hidden><label for="phone-number"></label>
+                <input id="phone-number" name="phone_number" type="tel" autocomplete="tel" required>
+              </div>
               <div id="code-field"><label for="sms-code"></label>
                 <input id="sms-code" name="sms_code" type="text" inputmode="numeric"
                   autocomplete="one-time-code" pattern="[0-9]{4}" minlength="4" maxlength="4" required>
@@ -210,11 +226,12 @@ class EvoluteLoginPanel extends HTMLElement {
       fallback: "fallback", "fallback-help": "fallbackHelp",
       received: "received", "recovery-title": "recovery", "recovery-help": "recoveryHelp",
       restart: this._isolatedLogin ? "reset" : "restart",
-      "code-help": "codeHelp", "request-again": "requestAgain",
+      "code-help": "codeHelp", "phone-help": "phoneHelp", "request-again": "requestAgain",
     })) this._element(id).textContent = this._text(key);
     this.shadowRoot.querySelector("h1").textContent = this._text("title");
     this._element("status").textContent = this._text("loading");
     this.shadowRoot.querySelector("label[for='car-id']").textContent = this._text("car");
+    this.shadowRoot.querySelector("label[for='phone-number']").textContent = this._text("phone");
     this.shadowRoot.querySelector("form").addEventListener("submit", (event) => {
       event.preventDefault();
       this._submit();
@@ -237,10 +254,12 @@ class EvoluteLoginPanel extends HTMLElement {
 
   _message(key) {
     this.shadowRoot.querySelector(".columns").hidden = true;
+    this._element("instructions").hidden = true;
     this._element("status").hidden = false;
     this._element("status").textContent = this._text(key);
     // Drop the third-party page once authentication has finished.
     this._element("frame").replaceChildren();
+    this._element("phone-number").value = "";
     this._element("sms-code").value = "";
     this._step = null;
     this._smsStage = null;
@@ -270,27 +289,42 @@ class EvoluteLoginPanel extends HTMLElement {
       }
       return;
     }
-    if (result.type !== "form" || !["sms", "select_car"].includes(result.step_id)) {
+    if (result.type !== "form" || !["phone", "sms", "select_car"].includes(result.step_id)) {
       this._message("unavailable");
       return;
     }
+    const previousStep = this._step;
     this._step = result.step_id;
+    const phone = this._step === "phone";
     const sms = this._step === "sms";
     this._element("status").hidden = true;
     this.shadowRoot.querySelector(".columns").hidden = false;
+    this._element("phone-field").hidden = !phone;
+    this._element("phone-help").hidden = !phone;
     this._element("code-field").hidden = !sms;
     this._element("sms-code").value = "";
-    this._element("car-field").hidden = sms;
-    this._element("form-title").textContent = this._text(sms ? "finish" : "car");
+    this._element("car-field").hidden = phone || sms;
+    this._element("form-title").textContent = this._text(phone ? "phoneTitle" : sms ? "finish" : "car");
     this._element("code-help").hidden = !sms;
     this._element("request-again").hidden = !sms;
-    if (sms) {
+    if (phone) {
+      this._smsStage = null;
+      this._element("instructions").hidden = true;
+      this._element("official").hidden = true;
+      this._element("entry").hidden = false;
+      this._element("frame").replaceChildren();
+      if (previousStep !== "phone") {
+        const field = result.data_schema?.find((item) => item.name === "phone_number");
+        this._element("phone-number").value = typeof field?.default === "string" ? field.default : "";
+      }
+    } else if (sms) {
       const phone = result.description_placeholders?.phone_number || "";
       this._element("instructions").textContent = this._text("requestHelp", phone);
       this.shadowRoot.querySelector("label[for='sms-code']").textContent = this._text("code", phone);
       this._showSmsStage(this._smsStage || "request");
     } else {
       this._smsStage = null;
+      this._element("instructions").hidden = true;
       this._element("official").hidden = true;
       this._element("entry").hidden = false;
       this._element("frame").replaceChildren();
@@ -314,11 +348,12 @@ class EvoluteLoginPanel extends HTMLElement {
     this._busy = busy;
     const button = this._element("submit");
     button.disabled = busy;
-    button.textContent = this._text(busy ? "working" : this._step === "sms"
-      ? "signIn" : this._element("car-id").options.length ? "connect" : "retry");
+    button.textContent = this._text(busy ? "working" : this._step === "phone" ? "next"
+      : this._step === "sms" ? "signIn" : this._element("car-id").options.length ? "connect" : "retry");
     for (const id of ["received", "restart", "request-again"]) {
       this._element(id).disabled = busy;
     }
+    this._element("phone-number").disabled = busy || this._step !== "phone";
     this._element("sms-code").disabled = busy || this._step !== "sms" || this._smsStage !== "code";
     this._element("car-id").disabled = busy || this._step !== "select_car";
   }
@@ -326,6 +361,7 @@ class EvoluteLoginPanel extends HTMLElement {
   _showSmsStage(stage) {
     this._smsStage = stage;
     const request = stage === "request";
+    this._element("instructions").hidden = !request;
     this._element("official").hidden = !request;
     this._element("entry").hidden = request;
     if (request) {
@@ -369,7 +405,9 @@ class EvoluteLoginPanel extends HTMLElement {
     if (this._busy || !this._step) return;
     if (this._step === "sms" && this._smsStage !== "code") return;
     const data = {};
-    if (this._step === "sms") {
+    if (this._step === "phone") {
+      data.phone_number = this._element("phone-number").value.trim();
+    } else if (this._step === "sms") {
       const code = this._element("sms-code").value.trim();
       if (!/^[0-9]{4}$/.test(code)) {
         this._element("error").textContent = this._text("invalid_code");

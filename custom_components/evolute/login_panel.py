@@ -6,15 +6,17 @@ import asyncio
 import logging
 from pathlib import Path
 
-from homeassistant.components import panel_custom
+from homeassistant.components import frontend, panel_custom
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 
 PANEL_PATH = "evolute-login"
 SCRIPT_URL = "/evolute_static/login-panel.js"
-PANEL_ELEMENT = "evolute-login-panel-v4"
-PANEL_MODULE_URL = f"{SCRIPT_URL}?v=4"
+PANEL_ELEMENT = "evolute-login-panel-v5"
+PANEL_MODULE_URL = f"{SCRIPT_URL}?v=5"
+HANDOFF_SCRIPT_URL = "/evolute_static/login-handoff.js"
+HANDOFF_MODULE_URL = f"{HANDOFF_SCRIPT_URL}?v=1"
 _SETUP_TASK = f"{DOMAIN}_login_panel_setup"
 _STATIC_REGISTERED = f"{DOMAIN}_login_panel_static"
 _LOGGER = logging.getLogger(__name__)
@@ -41,17 +43,22 @@ async def async_ensure_login_panel(hass: HomeAssistant) -> bool:
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
-    script_path = str(Path(__file__).parent / "frontend" / "login-panel.js")
+    frontend_path = Path(__file__).parent / "frontend"
+    scripts = [
+        (SCRIPT_URL, str(frontend_path / "login-panel.js")),
+        (HANDOFF_SCRIPT_URL, str(frontend_path / "login-handoff.js")),
+    ]
     if not hass.data.get(_STATIC_REGISTERED):
         if hasattr(hass.http, "async_register_static_paths"):
             from homeassistant.components.http import StaticPathConfig
 
             await hass.http.async_register_static_paths(
-                [StaticPathConfig(SCRIPT_URL, script_path, False)]
+                [StaticPathConfig(url, path, False) for url, path in scripts]
             )
         else:
             # Compatibility with older supported Home Assistant versions.
-            hass.http.register_static_path(SCRIPT_URL, script_path, False)
+            for url, path in scripts:
+                hass.http.register_static_path(url, path, False)
         hass.data[_STATIC_REGISTERED] = True
 
     await panel_custom.async_register_panel(
@@ -61,3 +68,4 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         module_url=PANEL_MODULE_URL,
         require_admin=True,
     )
+    frontend.add_extra_js_url(hass, HANDOFF_MODULE_URL)

@@ -97,14 +97,19 @@ async def test_sms_setup(hass):
         config_entries.SOURCE_RECONFIGURE,
     ],
 )
-async def test_embedded_screen_survives_dialog_closing(hass, source):
-    """HA may close the opening dialog without deleting the panel's SMS flow."""
+async def test_embedded_screen_survives_dialog_closing(hass, source, monkeypatch):
+    """The panel collects the phone and goes straight to SMS in a separate flow."""
+    monkeypatch.setattr(
+        "custom_components.evolute.config_flow.async_ensure_login_panel",
+        AsyncMock(return_value=True),
+    )
     context = {"source": source}
     entry = None
     original = {
         CONF_CAR_ID: "car-1",
         CONF_ACCESS_TOKEN: "old",
         CONF_REFRESH_TOKEN: "old-refresh",
+        CONF_PHONE_NUMBER: "79991234567",
     }
     if source != config_entries.SOURCE_USER:
         entry = MockConfigEntry(
@@ -115,33 +120,32 @@ async def test_embedded_screen_survives_dialog_closing(hass, source):
         )
         entry.add_to_hass(hass)
         context["entry_id"] = entry.entry_id
-    with patch(
-        "custom_components.evolute.config_flow.async_ensure_login_panel",
-        new_callable=AsyncMock,
-        return_value=True,
-    ):
-        result = await phone_step(
-            hass, await start(hass, context=context, data=original)
-        )
+    result = await start(hass, context=context, data=original)
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "continue_in_panel"
     parent_flow_id = result["flow_id"]
-    flow_type, flow_id = result["next_flow"]
-    assert flow_type == "config_flow"
-    assert flow_id != parent_flow_id
-    assert result["description_placeholders"]["login_url"] == (
-        f"/evolute-login?flow_id={flow_id}"
-    )
+    assert "next_flow" not in result
     # The native dialog deletes unfinished flows that it started itself when
     # an internal link is clicked. This parent is already finished; the child
-    # is continued with continueFlowId and is not owned by that dialog.
+    # belongs to the panel and is not continued in another native dialog.
     with pytest.raises(UnknownFlow):
         hass.config_entries.flow.async_get(parent_flow_id)
     progress = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert len(progress) == 1
-    assert progress[0]["flow_id"] == flow_id
+    flow_id = progress[0]["flow_id"]
+    assert flow_id != parent_flow_id
+    assert result["description_placeholders"]["login_url"] == (
+        f"/evolute-login?flow_id={flow_id}"
+    )
     assert progress[0]["context"]["source"] == source
     result = await hass.config_entries.flow.async_configure(flow_id)
+    assert result["step_id"] == "phone"
+    if entry is not None:
+        field = next(iter(result["data_schema"].schema))
+        assert field.default() == "79991234567"
+    result = await phone_step(hass, result)
+    assert result["type"] is FlowResultType.FORM
+    assert result["flow_id"] == flow_id
     assert result["step_id"] == "sms"
     assert result["description_placeholders"]["phone_number"] == "+79991234567"
     with patch.object(

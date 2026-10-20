@@ -11,7 +11,7 @@
       },
       "phone": {
         "title": "Sign in by phone",
-        "description": "Enter the phone number used in your Evolute account. On the next step, open the sign-in screen inside Home Assistant to request an SMS code.",
+        "description": "Enter the phone number used in your Evolute account. The official SMS request form opens immediately after submission.",
         "data": {
           "phone_number": "Phone number"
         }
@@ -57,7 +57,7 @@
       "entry_removed": "The integration entry has been removed.",
       "reauth_successful": "Sign-in successful.",
       "reconfigure_successful": "Sign-in details updated.",
-      "continue_in_panel": "Continue [signing in on the embedded Home Assistant screen]({login_url}). Your phone number has been carried over: request an SMS in the official form, press \"SMS received\" and enter the code on the next Home Assistant step."
+      "continue_in_panel": "Opening the [sign-in screen]({login_url})…"
     }
   },
   "options": {
