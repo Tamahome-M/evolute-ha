@@ -56,7 +56,8 @@
       "wrong_account": "This account does not have the car being reauthenticated. Sign in to the account that has access to it.",
       "entry_removed": "The integration entry has been removed.",
       "reauth_successful": "Sign-in successful.",
-      "reconfigure_successful": "Sign-in details updated."
+      "reconfigure_successful": "Sign-in details updated.",
+      "continue_in_panel": "Continue [signing in on the embedded Home Assistant screen]({login_url}). Your phone number has been carried over; request an SMS in the official form and enter the code in the Home Assistant field."
     }
   },
   "options": {
