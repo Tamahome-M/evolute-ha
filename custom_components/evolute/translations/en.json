@@ -11,14 +11,14 @@
       },
       "phone": {
         "title": "Sign in by phone",
-        "description": "Enter the phone number used in your Evolute account. On the next step, request an SMS code on the official website.",
+        "description": "Enter the phone number used in your Evolute account. On the next step, open the sign-in screen inside Home Assistant to request an SMS code.",
         "data": {
           "phone_number": "Phone number"
         }
       },
       "sms": {
         "title": "Enter the SMS code",
-        "description": "1. Open the [official login page]({login_url}) in a private browser window.\n2. Enter **{phone_number}**, complete the CAPTCHA and request an SMS code.\n3. Enter the 4-digit code **here in Home Assistant**, without entering it on the website. The code can only be used once.\n\nTo request another code, use the same official page.",
+        "description": "Open the [sign-in screen]({login_url}) to request an SMS for **{phone_number}** and enter the code there. The official form and Home Assistant code field are shown on the same screen.\n\nIf the embedded page does not work, open the [official login page]({official_login_url}) in a private browser window, enter the same number, complete the CAPTCHA and request an SMS. Enter the 4-digit code here in Home Assistant, without entering it on the website. The code can only be used once.",
         "data": {
           "sms_code": "SMS code"
         }

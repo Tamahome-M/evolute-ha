@@ -19,8 +19,20 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
-      - run: ruff check custom_components/evolute/api.py custom_components/evolute/config_flow.py custom_components/evolute/coordinator.py custom_components/evolute/__init__.py custom_components/evolute/const.py tests
+      - run: ruff check custom_components/evolute/api.py custom_components/evolute/config_flow.py custom_components/evolute/coordinator.py custom_components/evolute/__init__.py custom_components/evolute/const.py custom_components/evolute/login_panel.py tests
       - run: pytest -q
+
+  frontend:
+    name: Login screen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
 
   hacs:
     name: HACS

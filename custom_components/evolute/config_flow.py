@@ -38,6 +38,7 @@ from .const import (
     DOMAIN,
     LOGIN_PAGE_URL,
 )
+from .login_panel import PANEL_PATH, async_ensure_login_panel
 
 
 def _normalize_phone(value: str) -> str:
@@ -116,6 +117,7 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._tokens: dict[str, str] = {}
         self._cars: dict[str, dict] = {}
         self._entry: config_entries.ConfigEntry | None = None
+        self._embedded_login_url = LOGIN_PAGE_URL
 
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
         """Choose between SMS authentication and manually supplied tokens."""
@@ -180,6 +182,8 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 self._tokens = {}
                 self._cars = {}
+                if await async_ensure_login_panel(self.hass):
+                    self._embedded_login_url = f"/{PANEL_PATH}?flow_id={self.flow_id}"
                 return await self.async_step_sms()
 
         return self.async_show_form(
@@ -210,7 +214,8 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
             description_placeholders={
-                "login_url": LOGIN_PAGE_URL,
+                "login_url": self._embedded_login_url,
+                "official_login_url": LOGIN_PAGE_URL,
                 "phone_number": "+" + self._phone,
             },
         )

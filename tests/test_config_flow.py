@@ -89,6 +89,24 @@ async def test_sms_setup(hass):
     assert CONF_SMS_CODE not in result["data"]
 
 
+async def test_embedded_screen_continues_same_flow(hass):
+    """The panel URL contains only a flow ID and reuses the existing SMS step."""
+    with patch(
+        "custom_components.evolute.config_flow.async_ensure_login_panel",
+        new_callable=AsyncMock,
+        return_value=True,
+    ):
+        result = await phone_step(hass, await start(hass))
+    flow_id = result["flow_id"]
+    assert result["description_placeholders"]["login_url"] == (
+        f"/evolute-login?flow_id={flow_id}"
+    )
+    result = await hass.config_entries.flow.async_configure(flow_id)
+    assert result["step_id"] == "sms"
+    result = await sms_step(hass, result)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
 async def test_manual_tokens_still_work(hass, requests_mock):
     """Manual setup stores the refreshed pair and retains the car's unique ID."""
     requests_mock.post(
