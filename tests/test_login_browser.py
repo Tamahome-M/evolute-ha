@@ -52,7 +52,7 @@ async def test_first_sms_choice_opens_working_panel(
         await context.route(
             "https://app.evassist.ru/**",
             lambda route: route.fulfill(
-                content_type="text/html",
+                content_type="text/html; charset=utf-8",
                 body="<h1>EVAssist</h1><label>Телефон<input type='tel'></label>"
                 "<button onclick=\"document.querySelector('p').textContent='СМС отправлена'\">Запросить СМС</button><p></p>",
             ),
