@@ -104,6 +104,7 @@ async def test_sms_choice_directly_opens_panel(hass, source, monkeypatch):
         "custom_components.evolute.config_flow.async_ensure_login_panel",
         AsyncMock(return_value=True),
     )
+    hass.config.internal_url = "http://homeassistant.local:8123"
     context = {"source": source}
     entry = None
     original = {
@@ -131,7 +132,10 @@ async def test_sms_choice_directly_opens_panel(hass, source, monkeypatch):
     child_id = next(
         item["flow_id"] for item in progress if item["flow_id"] != parent_id
     )
-    assert opening["url"] == f"/evolute-login?flow_id={child_id}"
+    assert (
+        opening["url"]
+        == f"http://homeassistant.local:8123/evolute-login?flow_id={child_id}"
+    )
     # Native external-step polling must not create another continued flow.
     assert (await hass.config_entries.flow.async_configure(parent_id))[
         "url"
@@ -175,6 +179,7 @@ async def test_sms_choice_directly_opens_panel(hass, source, monkeypatch):
 
 
 async def test_panel_survives_original_dialog_closing(hass, monkeypatch):
+    hass.config.internal_url = "http://homeassistant.local:8123"
     monkeypatch.setattr(
         "custom_components.evolute.config_flow.async_ensure_login_panel",
         AsyncMock(return_value=True),

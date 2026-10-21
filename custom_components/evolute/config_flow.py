@@ -44,7 +44,7 @@ from .const import (
     DOMAIN,
     LOGIN_PAGE_URL,
 )
-from .login_panel import PANEL_PATH, async_ensure_login_panel
+from .login_panel import PANEL_PATH, async_ensure_login_panel, login_panel_url
 
 
 def _normalize_phone(value: str) -> str:
@@ -124,6 +124,7 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._cars: dict[str, dict] = {}
         self._entry: config_entries.ConfigEntry | None = None
         self._panel_flow_id: str | None = None
+        self._panel_url = ""
         self._panel_outcome: str | None = None
 
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
@@ -156,6 +157,7 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await manager.async_configure(
                 self._panel_flow_id, {"next_step_id": "phone"}
             )
+            self._panel_url = login_panel_url(self.hass, self._panel_flow_id)
             return await self.async_step_embedded()
         return await self.async_step_sms()
 
@@ -167,7 +169,7 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_external_step_done(next_step_id="embedded_done")
         return self.async_external_step(
             step_id="embedded",
-            url=f"/{PANEL_PATH}?flow_id={self._panel_flow_id}",
+            url=self._panel_url,
         )
 
     async def async_step_embedded_done(

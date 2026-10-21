@@ -8,6 +8,8 @@ from pathlib import Path
 
 from homeassistant.components import panel_custom
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import http
+from homeassistant.helpers.network import get_url
 
 from .const import DOMAIN
 
@@ -18,6 +20,13 @@ PANEL_MODULE_URL = f"{SCRIPT_URL}?v=6"
 _SETUP_TASK = f"{DOMAIN}_login_panel_setup"
 _STATIC_REGISTERED = f"{DOMAIN}_login_panel_static"
 _LOGGER = logging.getLogger(__name__)
+
+
+def login_panel_url(hass: HomeAssistant, flow_id: str) -> str:
+    """Use the actual browser origin, including reverse proxy scheme and port."""
+    request = http.current_request.get()
+    origin = str(request.url.origin()) if request is not None else get_url(hass)
+    return f"{origin.rstrip('/')}/{PANEL_PATH}?flow_id={flow_id}"
 
 
 async def async_ensure_login_panel(hass: HomeAssistant) -> bool:

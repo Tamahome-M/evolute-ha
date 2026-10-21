@@ -77,7 +77,8 @@ async def test_first_sms_choice_opens_working_panel(
         await page.goto(base + "/config/integrations/dashboard")
         await page.get_by_role(
             "button", name=re.compile("Добавить интеграцию|Add integration")
-        ).click(timeout=45000)
+        ).first.click(timeout=45000)
+        await page.screenshot(path=str(artifacts / "integration-picker.png"))
         await page.get_by_role("textbox").last.fill("Evolute")
         await page.get_by_text("Evolute", exact=True).last.click()
         await page.screenshot(path=str(artifacts / "login-method.png"))
