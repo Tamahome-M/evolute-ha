@@ -6,8 +6,10 @@ import pytest
 import requests
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType, InvalidData, UnknownFlow
+from homeassistant.helpers import config_validation as cv
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.evolute.config_flow import vol
 from custom_components.evolute.const import (
     BASE_URL,
     CONF_ACCESS_TOKEN,
@@ -57,25 +59,26 @@ async def start(hass, method="phone", context=None, data=None):
     )
 
 
-async def phone_step(hass, result):
+async def request_sms_step(hass, result):
+    assert result["step_id"] == "request_sms"
     return await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_PHONE_NUMBER: "+7 (999) 123-45-67"},
+        {},
     )
 
 
 async def sms_step(hass, result):
     return await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_SMS_CODE: "0123"},
+        {CONF_PHONE_NUMBER: "+7 (999) 123-45-67", CONF_SMS_CODE: "0123"},
     )
 
 
 async def test_sms_setup(hass):
     """A single car is discovered automatically and the code is never saved."""
-    result = await phone_step(hass, await start(hass))
+    result = await request_sms_step(hass, await start(hass))
     assert result["step_id"] == "sms"
-    assert result["description_placeholders"]["phone_number"] == "+79991234567"
+    assert {CONF_PHONE_NUMBER, CONF_SMS_CODE} <= set(result["data_schema"].schema)
     result = await sms_step(hass, result)
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "i-JOY 2024"
@@ -97,10 +100,10 @@ async def test_sms_setup(hass):
         config_entries.SOURCE_RECONFIGURE,
     ],
 )
-async def test_embedded_screen_survives_dialog_closing(hass, source, monkeypatch):
-    """The panel collects the phone and goes straight to SMS in a separate flow."""
+async def test_embedded_form_uses_one_native_flow(hass, source, monkeypatch):
+    """Menu → website → phone + code stays in one dialog for every source."""
     monkeypatch.setattr(
-        "custom_components.evolute.config_flow.async_ensure_login_panel",
+        "custom_components.evolute.config_flow.async_ensure_login_ui",
         AsyncMock(return_value=True),
     )
     context = {"source": source}
@@ -121,33 +124,42 @@ async def test_embedded_screen_survives_dialog_closing(hass, source, monkeypatch
         entry.add_to_hass(hass)
         context["entry_id"] = entry.entry_id
     result = await start(hass, context=context, data=original)
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "continue_in_panel"
-    parent_flow_id = result["flow_id"]
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "request_sms"
+    flow_id = result["flow_id"]
     assert "next_flow" not in result
-    # The native dialog deletes unfinished flows that it started itself when
-    # an internal link is clicked. This parent is already finished; the child
-    # belongs to the panel and is not continued in another native dialog.
-    with pytest.raises(UnknownFlow):
-        hass.config_entries.flow.async_get(parent_flow_id)
     progress = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert len(progress) == 1
-    flow_id = progress[0]["flow_id"]
-    assert flow_id != parent_flow_id
-    assert result["description_placeholders"]["login_url"] == (
-        f"/evolute-login?flow_id={flow_id}"
-    )
+    assert progress[0]["flow_id"] == flow_id
     assert progress[0]["context"]["source"] == source
-    result = await hass.config_entries.flow.async_configure(flow_id)
-    assert result["step_id"] == "phone"
-    if entry is not None:
-        field = next(iter(result["data_schema"].schema))
-        assert field.default() == "79991234567"
-    result = await phone_step(hass, result)
+    fields = vol.to_field_list(
+        result["data_schema"], custom_serializer=cv.custom_serializer
+    )
+    assert fields == [
+        {
+            "name": "evassist",
+            "required": False,
+            "optional": True,
+            "selector": {"evolute_login": {"flow_id": flow_id, "mode": "request"}},
+        }
+    ]
+    result = await request_sms_step(hass, result)
     assert result["type"] is FlowResultType.FORM
     assert result["flow_id"] == flow_id
     assert result["step_id"] == "sms"
-    assert result["description_placeholders"]["phone_number"] == "+79991234567"
+    fields = vol.to_field_list(
+        result["data_schema"], custom_serializer=cv.custom_serializer
+    )
+    assert [field["name"] for field in fields] == [
+        "phone_number",
+        "sms_code",
+        "evassist",
+    ]
+    assert fields[0]["required"] and fields[1]["required"]
+    assert fields[0]["default"] == ("79991234567" if entry else "")
+    assert fields[2]["selector"] == {
+        "evolute_login": {"flow_id": flow_id, "mode": "actions"}
+    }
     with patch.object(
         hass.config_entries, "async_reload", new_callable=AsyncMock
     ) as reload:
@@ -191,10 +203,10 @@ async def test_manual_tokens_still_work(hass, requests_mock):
 
 @pytest.mark.parametrize("number", ["", "abc", "123", "+7 1234567", "7+9991234567"])
 async def test_bad_phone(hass, number, requests_mock):
-    result = await start(hass)
+    result = await request_sms_step(hass, await start(hass))
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_PHONE_NUMBER: number},
+        {CONF_PHONE_NUMBER: number, CONF_SMS_CODE: "0123"},
     )
     assert result["errors"] == {CONF_PHONE_NUMBER: "invalid_phone"}
     assert requests_mock.call_count == 0
@@ -211,17 +223,17 @@ async def test_bad_phone(hass, number, requests_mock):
 )
 async def test_login_failures(hass, requests_mock, response, error):
     requests_mock.post(LOGIN_URL, **response)
-    result = await sms_step(hass, await phone_step(hass, await start(hass)))
+    result = await sms_step(hass, await request_sms_step(hass, await start(hass)))
     assert result["step_id"] == "sms"
     assert result["errors"] == {"base": error}
     assert not hass.config_entries.async_entries(DOMAIN)
 
 
 async def test_bad_code_then_retry(hass, requests_mock):
-    result = await phone_step(hass, await start(hass))
+    result = await request_sms_step(hass, await start(hass))
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_SMS_CODE: "12ab"},
+        {CONF_PHONE_NUMBER: "+79991234567", CONF_SMS_CODE: "12ab"},
     )
     assert result["errors"] == {CONF_SMS_CODE: "invalid_code"}
     assert requests_mock.call_count == 0
@@ -229,10 +241,52 @@ async def test_bad_code_then_retry(hass, requests_mock):
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
+async def test_request_new_sms_without_credentials(hass, requests_mock):
+    """Recovery returns to the website without logging in or creating a flow."""
+    result = await request_sms_step(hass, await start(hass))
+    flow_id = result["flow_id"]
+    result = await hass.config_entries.flow.async_configure(
+        flow_id, {CONF_PHONE_NUMBER: "+79991234567", CONF_SMS_CODE: "bad"}
+    )
+    assert result["errors"] == {CONF_SMS_CODE: "invalid_code"}
+    result = await hass.config_entries.flow.async_configure(
+        flow_id, {"evassist": "request_again"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "request_sms"
+    assert result["flow_id"] == flow_id
+    assert requests_mock.call_count == 0
+    result = await request_sms_step(hass, result)
+    assert result["data_schema"]({})[CONF_PHONE_NUMBER] == "79991234567"
+    assert result["data_schema"]({})[CONF_SMS_CODE] == ""
+    result = await sms_step(hass, result)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_empty_credentials_cannot_sign_in(hass, requests_mock):
+    result = await request_sms_step(hass, await start(hass))
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["errors"] == {
+        CONF_PHONE_NUMBER: "invalid_phone",
+        CONF_SMS_CODE: "invalid_code",
+    }
+    assert requests_mock.call_count == 0
+
+
+async def test_closing_native_dialog_cancels_only_its_flow(hass):
+    """There are no abandoned child login sessions after closing the dialog."""
+    result = await start(hass)
+    flow_id = result["flow_id"]
+    hass.config_entries.flow.async_abort(flow_id)
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    with pytest.raises(UnknownFlow):
+        hass.config_entries.flow.async_get(flow_id)
+
+
 async def test_car_selection(hass, requests_mock):
     second = {**CAR, "_id": "car-2", "vin": "TEST-VIN-2"}
     requests_mock.post(SEARCH_URL, json={"rows": [CAR, second], "total": 2})
-    result = await sms_step(hass, await phone_step(hass, await start(hass)))
+    result = await sms_step(hass, await request_sms_step(hass, await start(hass)))
     assert result["step_id"] == "select_car"
     with pytest.raises(InvalidData):
         await hass.config_entries.flow.async_configure(
@@ -258,7 +312,7 @@ async def test_discovery_retry_keeps_rotated_session(hass, requests_mock):
             {"json": {"rows": [CAR], "total": 1}},
         ],
     )
-    result = await sms_step(hass, await phone_step(hass, await start(hass)))
+    result = await sms_step(hass, await request_sms_step(hass, await start(hass)))
     assert result["step_id"] == "select_car"
     assert result["errors"] == {"base": "cannot_connect"}
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
@@ -276,7 +330,7 @@ async def test_empty_account_and_duplicate(hass, requests_mock, existing, reason
         MockConfigEntry(domain=DOMAIN, unique_id="car-1", data={}).add_to_hass(hass)
     else:
         requests_mock.post(SEARCH_URL, json={"rows": [], "total": 0})
-    result = await sms_step(hass, await phone_step(hass, await start(hass)))
+    result = await sms_step(hass, await request_sms_step(hass, await start(hass)))
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == reason
 
@@ -309,7 +363,7 @@ async def test_existing_entry_sign_in(hass, method, source):
         hass.config_entries, "async_reload", new_callable=AsyncMock
     ) as reload:
         if method == "phone":
-            result = await sms_step(hass, await phone_step(hass, result))
+            result = await sms_step(hass, await request_sms_step(hass, result))
         else:
             assert CONF_CAR_ID not in result["data_schema"].schema
             result = await hass.config_entries.flow.async_configure(
@@ -350,7 +404,7 @@ async def test_reauth_wrong_account(hass, requests_mock):
         context={"source": config_entries.SOURCE_REAUTH, "entry_id": entry.entry_id},
         data=original,
     )
-    result = await sms_step(hass, await phone_step(hass, result))
+    result = await sms_step(hass, await request_sms_step(hass, result))
     assert result["reason"] == "wrong_account"
     assert dict(entry.data) == original
 

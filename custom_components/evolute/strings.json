@@ -9,19 +9,15 @@
           "token": "Access and refresh tokens"
         }
       },
-      "phone": {
-        "title": "Sign in by phone",
-        "description": "Enter the phone number used in your Evolute account. The official SMS request form opens immediately after submission.",
-        "data": {
-          "phone_number": "Phone number"
-        }
-      },
       "sms": {
-        "title": "Enter the SMS code",
-        "description": "Open the [sign-in screen]({login_url}) and request an SMS for **{phone_number}**. Then press \"SMS received\": the official page will close and the Home Assistant code field will appear. Do not enter the code on the EVAssist page.\n\nIf the embedded page does not work, open the [official login page]({official_login_url}) in a private window, enter the same number, complete the CAPTCHA and request an SMS. Enter the code here in Home Assistant, without entering it on the website. If you already used the code, request another one.",
+        "title": "Phone number and SMS code",
+        "description": "Enter the same phone number you used to request the SMS and the 4-digit code. Home Assistant will sign in and receive the tokens automatically.",
         "data": {
-          "sms_code": "SMS code"
-        }
+          "phone_number": "Phone number",
+          "sms_code": "SMS code",
+          "evassist": "EVAssist"
+        },
+        "submit": "Sign in"
       },
       "token": {
         "title": "Sign in with tokens",
@@ -36,7 +32,16 @@
         "title": "Select your car",
         "description": "Choose a car from your account. If loading failed, submit this step again to retry without requesting another SMS code.",
         "data": {
-          "car_id": "Car"
+          "car_id": "Car",
+          "evassist": "EVAssist"
+        }
+      },
+      "request_sms": {
+        "title": "Request an SMS",
+        "description": "Enter your phone number in the EVAssist form below, complete the CAPTCHA and request an SMS. **Do not enter the code on the website.** Once the SMS arrives, press “SMS received” at the bottom of this dialog. Enter the phone number and code together on the next HA step.\n\nIf the form is missing, reload the HA tab. You can also request the SMS on the [official website]({official_login_url}) in a private window.",
+        "submit": "SMS received",
+        "data": {
+          "evassist": "EVAssist"
         }
       }
     },
@@ -56,8 +61,7 @@
       "wrong_account": "This account does not have the car being reauthenticated. Sign in to the account that has access to it.",
       "entry_removed": "The integration entry has been removed.",
       "reauth_successful": "Sign-in successful.",
-      "reconfigure_successful": "Sign-in details updated.",
-      "continue_in_panel": "Opening the [sign-in screen]({login_url})…"
+      "reconfigure_successful": "Sign-in details updated."
     }
   },
   "options": {
