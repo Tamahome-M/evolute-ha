@@ -100,7 +100,7 @@ async def test_first_sms_choice_opens_working_panel(
         panel = await opened.value
         panel.on("pageerror", lambda error: errors.append(str(error)))
         await panel.wait_for_load_state()
-        await panel.locator("evolute-login-panel-v7 iframe").wait_for(
+        await panel.locator("evolute-login-panel-v8 iframe").wait_for(
             state="visible", timeout=45000
         )
         phone = panel.get_by_label("Номер телефона", exact=True)
