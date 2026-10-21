@@ -1,0 +1,38 @@
+name: Card compatibility
+
+on:
+  push:
+    branches: [compat/card-1219]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  card:
+    name: Card browser and behavior
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Tamahome-M/evolute-card
+          ref: 13f0bc5b375cb03601b9355d82e94b9e107dc5fc
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - run: pip install playwright==1.63.0
+      - run: playwright install --with-deps chromium
+      - run: python tests/test_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: card-screenshots
+          path: artifacts/
