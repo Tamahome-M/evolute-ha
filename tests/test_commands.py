@@ -40,7 +40,7 @@ TELEMETRY = {
         "isCentralLockingOn": False, "isParkedOn": True, "isTrunkOpen": False,
         "isChargingGunInserted": True, "batteryTemp": "19", "batteryPercentage": "92",
         "remainsBatteryMileage": "101", "odometer": "1234", "12VBatteryVoltage": "13.8",
-        "outsideTemp": "24", "inBoardTemp": "28", "climateTargetTemp": "24",
+        "outsideTemp": "24", "inBoardTemp": "28", "climateTargetTemp": "24", "signalLevel": "19",
     },
     "isOnline": True,
     "onlineState": "connected",
