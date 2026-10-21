@@ -11,6 +11,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DATA_COORDINATOR, DOMAIN
@@ -19,8 +20,20 @@ from .login_panel import async_ensure_login_panel
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "binary_sensor", "lock", "button", "number", "device_tracker"]
+PLATFORMS = ["sensor", "binary_sensor", "lock", "button", "device_tracker"]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+# These controls belonged to the removed PREPARE/CANCEL API. Remove only this
+# entry's retired entities, including disabled or user-renamed ones.
+_RETIRED_ENTITIES = {
+    "button": {"prepare_on", "prepare_off"},
+    "number": {
+        "prepare_temp", "prepare_duration", "prepare_seat_fl", "prepare_seat_fr",
+        "prepare_seat_rl", "prepare_seat_rr", "prepare_wheel",
+    },
+    "binary_sensor": {"prepare_running", "prepare_available"},
+    "sensor": {"prepare_end"},
+}
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -32,6 +45,17 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = EvolUteCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
+
+    registry = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        key = entity.translation_key
+        if key is None and entity.unique_id.startswith(f"{DOMAIN}_"):
+            # Older entries have no translation_key. Their IDs are
+            # evolute_<VIN or car id>_<key>; compare the whole key so that
+            # trip_prepare_on is not confused with the retired prepare_on.
+            key = entity.unique_id.split("_", 2)[-1]
+        if entity.platform == DOMAIN and key in _RETIRED_ENTITIES.get(entity.domain, ()):
+            registry.async_remove(entity.entity_id)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {DATA_COORDINATOR: coordinator}
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

@@ -106,9 +106,6 @@ SENSORS: tuple[_Desc, ...] = (
           entity_registry_enabled_default=False),
     _Desc(key="car_color", data_key="carModelColor", name="Цвет", icon="mdi:palette",
           entity_registry_enabled_default=False),
-    _Desc(key="prepare_end", data_key="preparation_scriptEndTime",
-          name="Предпрогрев: окончание", native_unit_of_measurement="мин",
-          icon="mdi:timer-outline"),
     # Position
     _Desc(key="speed", data_key="speed", name="Скорость", source="position",
           native_unit_of_measurement=UnitOfSpeed.KILOMETERS_PER_HOUR,
@@ -187,8 +184,8 @@ class EvolUteTimestampSensor(EvolUteSensor):
             ts = float(raw)
         except (TypeError, ValueError):
             return None
-        # The API mixes seconds and milliseconds (e.g. preparation_script uses
-        # ms). Anything past ~year 5138 in seconds is really milliseconds.
+        # The API mixes seconds and milliseconds. Anything past ~year 5138
+        # in seconds is really milliseconds.
         if ts > 1e11:
             ts /= 1000.0
         try:

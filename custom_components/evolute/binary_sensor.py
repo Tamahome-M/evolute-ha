@@ -59,6 +59,10 @@ BINARY_SENSORS: tuple[_Desc, ...] = (
           icon="mdi:car-brake-parking", is_on_fn=_truthy),
     _Desc(key="climate", data_key="climateStatus", name="Климат включён",
           device_class=BinarySensorDeviceClass.HEAT, icon="mdi:air-conditioner"),
+    _Desc(key="heating", data_key="heatingRunning", name="Обогрев включён",
+          icon="mdi:heat-wave", is_on_fn=_truthy),
+    _Desc(key="cooling", data_key="coolingRunning", name="Охлаждение включено",
+          icon="mdi:snowflake", is_on_fn=_truthy),
     _Desc(key="climate_defrost", data_key="climateFWindowStatus",
           name="Обогрев лобового стекла", icon="mdi:car-windshield"),
     _Desc(key="charging_gun", data_key="isChargingGunInserted",
@@ -76,10 +80,6 @@ BINARY_SENSORS: tuple[_Desc, ...] = (
           entity_category=EntityCategory.DIAGNOSTIC, is_on_fn=_truthy),
     _Desc(key="trip_preparation", data_key="tripPreparationRunning",
           name="Подготовка к поездке", icon="mdi:car-clock", is_on_fn=_truthy),
-    _Desc(key="prepare_running", data_key="preparation_scriptRunning",
-          name="Предпрогрев запущен", icon="mdi:engine-outline", is_on_fn=_truthy),
-    _Desc(key="prepare_available", data_key="preparation_scriptAvailable",
-          name="Предпрогрев доступен", icon="mdi:check-decagram", is_on_fn=_truthy),
 )
 
 
