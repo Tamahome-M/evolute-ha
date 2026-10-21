@@ -39,3 +39,24 @@ class EvolUteLock(EvolUteEntity, LockEntity):
 
     async def async_unlock(self, **kwargs) -> None:
         await self.coordinator.async_send_action("lock_open")
+
+    @property
+    def is_locking(self) -> bool:
+        return self._command_in_progress("centralLockingOn")
+
+    @property
+    def is_unlocking(self) -> bool:
+        return self._command_in_progress("centralLockingOff")
+
+    def _command_in_progress(self, command: str) -> bool:
+        result = self.coordinator.last_command
+        return result.get("command") == command and result["status"] in {
+            "sending", "pending", "delivered",
+        }
+
+    @property
+    def available(self) -> bool:
+        return super().available and all(
+            self.coordinator.action_available(action)
+            for action in ("lock_close", "lock_open")
+        )

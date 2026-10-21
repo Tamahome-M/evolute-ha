@@ -1,6 +1,7 @@
 """DataUpdateCoordinator for Evolute."""
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
 import time
@@ -9,8 +10,9 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import (
     EvolUteAPIError,
@@ -21,6 +23,8 @@ from .api import (
 )
 from .const import (
     CANCEL_COMMAND,
+    COMMAND_CONFIRM_TIMEOUT,
+    COMMAND_POLL_INTERVAL,
     COMMAND_TIMEOUT,
     CONF_ACCESS_TOKEN,
     CONF_CAR_ID,
@@ -37,6 +41,7 @@ from .const import (
     PREPARE_COMMAND,
     PREPARE_DEFAULTS,
     PREPARE_TIMEOUT,
+    TELEMETRY_ACTIONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -67,6 +72,8 @@ class EvolUteCoordinator(DataUpdateCoordinator):
         self.api_source: str = "tbox"
         self._raw_car: dict | None = None
         self._device_id_warned = False
+        self._command_lock = asyncio.Lock()
+        self.last_command: dict[str, Any] = {"status": "idle"}
         self.client = EvolUteClient(
             car_id=entry.data[CONF_CAR_ID],
             access_token=entry.data[CONF_ACCESS_TOKEN],
@@ -315,9 +322,26 @@ class EvolUteCoordinator(DataUpdateCoordinator):
             _LOGGER.debug(
                 "sensorDataTime unchanged (%s) — reusing previous sensor values", new_time
             )
-            sensors = prev_sensors
+            # Connection and profile checks may change independently of the
+            # vehicle's sensor timestamp. Keep those current even when parked.
+            sensors = {
+                **prev_sensors,
+                **{
+                    key: value for key, value in sensors.items()
+                    if used_telemetry and key in {
+                        "isOnline", "onlineState", "isCarStateReady",
+                        "firmwareActual", "firmwareExpected", "firmwareMismatch",
+                        "firmwareVersionText", "settingsActual", "settingsExpected",
+                        "settingsMismatch",
+                    }
+                },
+            }
 
-        return {"sensors": sensors, "position": position, "car_info": car_info}
+        buttons = telemetry_raw.get("buttons") if used_telemetry else None
+        return {
+            "sensors": sensors, "position": position, "car_info": car_info,
+            "buttons": buttons if isinstance(buttons, list) else None,
+        }
 
     # ------------------------------------------------------------------
     # Convenience properties
@@ -335,6 +359,98 @@ class EvolUteCoordinator(DataUpdateCoordinator):
     # Commands
     # ------------------------------------------------------------------
 
+    def action_available(self, action: str) -> bool:
+        """Respect the command capabilities advertised for this car."""
+        command = TELEMETRY_ACTIONS[action]
+        buttons = (self.data or {}).get("buttons")
+        if self.device_id and isinstance(buttons, list):
+            return any(
+                isinstance(button, dict) and button.get("enabled") is True
+                and command in (button.get("activateCommand"), button.get("deactivateCommand"))
+                for button in buttons
+            )
+        return action in INTELLIGENT_ACTIONS
+
+    def _command_state(self, status: str, **attributes: Any) -> None:
+        self.last_command = {
+            **self.last_command, **attributes, "status": status,
+            "updated_at": dt_util.utcnow().isoformat(),
+        }
+        self.async_update_listeners()
+
+    async def _call_with_auth(self, method: Any, *args: Any) -> Any:
+        """Retry only a rejected session; never retry an ambiguous command POST."""
+        try:
+            return await self.hass.async_add_executor_job(method, *args)
+        except EvolUteAuthError:
+            await self._async_refresh_and_persist()
+            return await self.hass.async_add_executor_job(method, *args)
+
+    def _check_command(self, action: str) -> None:
+        if not self.action_available(action):
+            raise HomeAssistantError("Эта команда недоступна для автомобиля")
+        if self.sensors.get("isOnline") is False:
+            raise HomeAssistantError("Автомобиль не в сети")
+        if self.sensors.get("isParkedOn") is False:
+            raise HomeAssistantError("Автомобиль должен быть в режиме паркинга")
+        if self.sensors.get("isTrunkOpen") is True and not action.startswith("trunk_"):
+            raise HomeAssistantError("Сначала закройте багажник")
+        if (
+            self.sensors.get("isCentralLockingOn") is False
+            and action not in {"lock_close", "lock_open", "blink"}
+        ):
+            raise HomeAssistantError("Сначала закройте центральный замок")
+
+    async def _wait_command(self, command_id: str) -> None:
+        async with asyncio.timeout(COMMAND_CONFIRM_TIMEOUT):
+            while True:
+                result = await self._call_with_auth(
+                    self.client.fetch_command_status, self.device_id
+                )
+                # Another browser or integration may have issued a command.
+                # Its success must never be attributed to our own command.
+                if result and result["commandId"] == command_id:
+                    status = result["status"]
+                    if status != "pending" or self.last_command["status"] != "delivered":
+                        self._command_state(status)
+                    if status == "success":
+                        return
+                    if status == "error":
+                        raise HomeAssistantError("Автомобиль не подтвердил выполнение команды")
+                await asyncio.sleep(COMMAND_POLL_INTERVAL)
+
+    async def _telemetry_action(self, action: str) -> None:
+        await self.async_refresh()
+        if not self.last_update_success:
+            raise HomeAssistantError("Не удалось обновить состояние автомобиля")
+        self._check_command(action)
+        command = TELEMETRY_ACTIONS[action]
+        self.last_command = {"command": command, "source": "telemetry"}
+        self._command_state("sending")
+        try:
+            command_id = await self._call_with_auth(
+                self.client.send_telemetry_command, self.device_id, command
+            )
+        except (EvolUteAPIError, EvolUteAuthError) as exc:
+            self._command_state("unconfirmed")
+            await self.async_request_refresh()
+            raise HomeAssistantError(
+                "Не удалось подтвердить отправку команды. Проверьте состояние автомобиля."
+            ) from exc
+        self._command_state("pending", command_id=command_id)
+        try:
+            await self._wait_command(command_id)
+        except TimeoutError as exc:
+            self._command_state("timeout")
+            raise HomeAssistantError("Истекло время ожидания подтверждения команды") from exc
+        except (EvolUteAPIError, EvolUteAuthError) as exc:
+            self._command_state("unconfirmed")
+            raise HomeAssistantError(
+                "Не удалось получить статус команды. Проверьте состояние автомобиля."
+            ) from exc
+        finally:
+            await self.async_request_refresh()
+
     async def _send_command(
         self, endpoint: str, value: Any = None, timeout: int = COMMAND_TIMEOUT
     ) -> None:
@@ -349,10 +465,20 @@ class EvolUteCoordinator(DataUpdateCoordinator):
             await self.hass.async_add_executor_job(call)
 
     async def async_send_action(self, action: str) -> None:
-        """Send a toggle/push command with skip-if-already logic."""
-        if action not in INTELLIGENT_ACTIONS:
+        """Prefer explicit commands and correlate their execution receipts."""
+        if action not in TELEMETRY_ACTIONS:
             raise ValueError(f"Unknown action: {action}")
+        if self._command_lock.locked():
+            raise HomeAssistantError("Уже выполняется команда автомобиля")
+        async with self._command_lock:
+            if self.device_id:
+                await self._telemetry_action(action)
+                return
+            if action not in INTELLIGENT_ACTIONS:
+                raise HomeAssistantError("Эта команда требует нового API автомобиля")
+            await self._legacy_action(action)
 
+    async def _legacy_action(self, action: str) -> None:
         endpoint, status_key, skip_if_value = INTELLIGENT_ACTIONS[action]
 
         # Toggle commands flip the state server-side, so don't re-send when we
@@ -364,7 +490,19 @@ class EvolUteCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Action '%s' skipped: already in desired state", action)
                 return
 
-        await self._send_command(endpoint, timeout=COMMAND_TIMEOUT)
+        await self._legacy_send(endpoint, timeout=COMMAND_TIMEOUT)
+
+    async def _legacy_send(self, endpoint: str, **kwargs: Any) -> None:
+        self.last_command = {"command": endpoint, "source": "tbox"}
+        self._command_state("sending")
+        try:
+            await self._send_command(endpoint, **kwargs)
+        except (EvolUteAPIError, EvolUteAuthError) as exc:
+            self._command_state("unconfirmed")
+            raise HomeAssistantError(
+                "Не удалось подтвердить отправку команды. Проверьте состояние автомобиля."
+            ) from exc
+        self._command_state("legacy_sent")
         await self.async_request_refresh()
 
     # ------------------------------------------------------------------
@@ -386,12 +524,18 @@ class EvolUteCoordinator(DataUpdateCoordinator):
 
     async def async_prepare(self) -> None:
         """Start preparation with the currently configured temp/time/heating."""
-        await self._send_command(
+        await self._legacy_prepare(
             PREPARE_COMMAND, value=self._prepare_value(), timeout=PREPARE_TIMEOUT
         )
-        await self.async_request_refresh()
 
     async def async_cancel_prepare(self) -> None:
         """Cancel a running preparation."""
-        await self._send_command(CANCEL_COMMAND, timeout=PREPARE_TIMEOUT)
-        await self.async_request_refresh()
+        await self._legacy_prepare(CANCEL_COMMAND, timeout=PREPARE_TIMEOUT)
+
+    async def _legacy_prepare(self, endpoint: str, **kwargs: Any) -> None:
+        # Custom seat/temperature parameters belong to PREPARE. The new
+        # tripPreparationOn command uses the vehicle profile, not these values.
+        if self._command_lock.locked():
+            raise HomeAssistantError("Уже выполняется команда автомобиля")
+        async with self._command_lock:
+            await self._legacy_send(endpoint, **kwargs)

@@ -66,5 +66,23 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "command_status": {
+        "name": "Last command status",
+        "state": {
+          "idle": "No commands",
+          "sending": "Sending",
+          "pending": "Sent",
+          "delivered": "Delivered",
+          "success": "Executed",
+          "error": "Execution failed",
+          "timeout": "Confirmation timed out",
+          "unconfirmed": "Outcome unknown",
+          "legacy_sent": "Sent without confirmation"
+        }
+      }
+    }
   }
 }

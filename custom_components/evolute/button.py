@@ -43,6 +43,10 @@ BUTTONS: tuple[_Desc, ...] = (
           press_fn=_action("trunk_close")),
     _Desc(key="blink",       name="Сигнал и фары",       icon="mdi:car-light-high",
           press_fn=_action("blink")),
+    _Desc(key="trip_prepare_on", name="Подготовка к поездке: вкл", icon="mdi:car-clock",
+          press_fn=_action("trip_prepare_on")),
+    _Desc(key="trip_prepare_off", name="Подготовка к поездке: выкл", icon="mdi:car-clock",
+          press_fn=_action("trip_prepare_off")),
     # Preparation (предпрогрев) — uses temp/time/heating from the number entities.
     _Desc(key="prepare_on",  name="Предпрогрев: вкл",     icon="mdi:car-key",
           press_fn=lambda c: c.async_prepare()),
@@ -67,3 +71,11 @@ class EvolUteButton(EvolUteEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         await self.entity_description.press_fn(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        if self.entity_description.key in {"prepare_on", "prepare_off"}:
+            return super().available
+        return super().available and self.coordinator.action_available(
+            self.entity_description.key
+        )

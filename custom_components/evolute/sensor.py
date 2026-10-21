@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -20,9 +20,10 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DATA_COORDINATOR, DOMAIN
+from .const import COMMAND_STATES, DATA_COORDINATOR, DOMAIN
 from .coordinator import EvolUteCoordinator
 from .entity_base import EvolUteEntity
 
@@ -95,6 +96,8 @@ SENSORS: tuple[_Desc, ...] = (
           device_class=SensorDeviceClass.TIMESTAMP, icon="mdi:timeline-clock"),
     _Desc(key="firmware_version", data_key="firmwareVersionText",
           name="Версия прошивки", icon="mdi:chip"),
+    _Desc(key="online_state", data_key="onlineState", name="Состояние связи",
+          icon="mdi:car-connected", entity_category=EntityCategory.DIAGNOSTIC),
     _Desc(key="vin", data_key="vin", name="VIN", icon="mdi:card-account-details",
           entity_registry_enabled_default=False),
     _Desc(key="car_model", data_key="carModelName", name="Модель", icon="mdi:car-info",
@@ -129,6 +132,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
         EvolUteTimestampSensor(coord, d) if d.key in _TIMESTAMP_KEYS else EvolUteSensor(coord, d)
         for d in SENSORS
     )
+    async_add_entities([EvolUteCommandStatusSensor(coord)])
+
+
+class EvolUteCommandStatusSensor(EvolUteEntity, SensorEntity):
+    """Report acknowledgements without treating HTTP acceptance as execution."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = COMMAND_STATES
+    _attr_icon = "mdi:progress-check"
+
+    def __init__(self, coordinator: EvolUteCoordinator) -> None:
+        super().__init__(coordinator, "command_status")
+
+    @property
+    def native_value(self) -> str:
+        return self.coordinator.last_command["status"]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            key: value for key, value in self.coordinator.last_command.items()
+            if key != "status"
+        }
 
 
 class EvolUteSensor(EvolUteEntity, SensorEntity):
@@ -166,6 +192,6 @@ class EvolUteTimestampSensor(EvolUteSensor):
         if ts > 1e11:
             ts /= 1000.0
         try:
-            return datetime.fromtimestamp(ts, tz=timezone.utc)
+            return datetime.fromtimestamp(ts, tz=UTC)
         except (OverflowError, OSError, ValueError):
             return None
