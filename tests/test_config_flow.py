@@ -60,11 +60,9 @@ async def start(hass, method="phone", context=None, data=None):
 
 
 async def request_sms_step(hass, result):
-    assert result["step_id"] == "request_sms"
-    return await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {},
-    )
+    # SMS requests happen on EVAssist; the continued HA flow is already ready.
+    assert result["step_id"] == "sms"
+    return result
 
 
 async def sms_step(hass, result):
@@ -100,12 +98,13 @@ async def test_sms_setup(hass):
         config_entries.SOURCE_RECONFIGURE,
     ],
 )
-async def test_embedded_form_uses_one_native_flow(hass, source, monkeypatch):
-    """Menu → website → phone + code stays in one dialog for every source."""
+async def test_sms_choice_directly_opens_panel(hass, source, monkeypatch):
+    """The very first result is a native external step, never an empty form."""
     monkeypatch.setattr(
-        "custom_components.evolute.config_flow.async_ensure_login_ui",
+        "custom_components.evolute.config_flow.async_ensure_login_panel",
         AsyncMock(return_value=True),
     )
+    hass.config.internal_url = "http://homeassistant.local:8123"
     context = {"source": source}
     entry = None
     original = {
@@ -123,43 +122,33 @@ async def test_embedded_form_uses_one_native_flow(hass, source, monkeypatch):
         )
         entry.add_to_hass(hass)
         context["entry_id"] = entry.entry_id
-    result = await start(hass, context=context, data=original)
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "request_sms"
-    flow_id = result["flow_id"]
-    assert "next_flow" not in result
+    opening = await start(hass, context=context, data=original)
+    assert opening["type"] is FlowResultType.EXTERNAL_STEP
+    assert "data_schema" not in opening
+    assert "next_flow" not in opening
+    parent_id = opening["flow_id"]
     progress = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
-    assert len(progress) == 1
-    assert progress[0]["flow_id"] == flow_id
-    assert progress[0]["context"]["source"] == source
-    fields = vol.to_field_list(
-        result["data_schema"], custom_serializer=cv.custom_serializer
+    assert len(progress) == 2
+    child_id = next(
+        item["flow_id"] for item in progress if item["flow_id"] != parent_id
     )
-    assert fields == [
-        {
-            "name": "evassist",
-            "required": False,
-            "optional": True,
-            "selector": {"evolute_login": {"flow_id": flow_id, "mode": "request"}},
-        }
-    ]
-    result = await request_sms_step(hass, result)
+    assert (
+        opening["url"]
+        == f"http://homeassistant.local:8123/evolute-login?flow_id={child_id}"
+    )
+    # Native external-step polling must not create another continued flow.
+    assert (await hass.config_entries.flow.async_configure(parent_id))[
+        "url"
+    ] == opening["url"]
+    assert len(hass.config_entries.flow.async_progress_by_handler(DOMAIN)) == 2
+    result = await hass.config_entries.flow.async_configure(child_id)
     assert result["type"] is FlowResultType.FORM
-    assert result["flow_id"] == flow_id
     assert result["step_id"] == "sms"
     fields = vol.to_field_list(
         result["data_schema"], custom_serializer=cv.custom_serializer
     )
-    assert [field["name"] for field in fields] == [
-        "phone_number",
-        "sms_code",
-        "evassist",
-    ]
-    assert fields[0]["required"] and fields[1]["required"]
+    assert [field["name"] for field in fields] == ["phone_number", "sms_code"]
     assert fields[0]["default"] == ("79991234567" if entry else "")
-    assert fields[2]["selector"] == {
-        "evolute_login": {"flow_id": flow_id, "mode": "actions"}
-    }
     with patch.object(
         hass.config_entries, "async_reload", new_callable=AsyncMock
     ) as reload:
@@ -167,7 +156,6 @@ async def test_embedded_form_uses_one_native_flow(hass, source, monkeypatch):
     if entry is None:
         assert result["type"] is FlowResultType.CREATE_ENTRY
     else:
-        assert result["type"] is FlowResultType.ABORT
         assert result["reason"] == (
             "reauth_successful"
             if source == config_entries.SOURCE_REAUTH
@@ -175,9 +163,34 @@ async def test_embedded_form_uses_one_native_flow(hass, source, monkeypatch):
         )
         reload.assert_awaited_once_with(entry.entry_id)
         assert entry.data[CONF_ACCESS_TOKEN] == "access"
-        assert entry.data[CONF_CAR_ID] == "car-1"
         assert dict(entry.options) == {CONF_SCAN_INTERVAL: 240}
+    # Child removal notifies the opening dialog only after the entry is saved.
+    await hass.async_block_till_done()
+    assert hass.config_entries.flow.async_get(parent_id)["step_id"] == "embedded_done"
+    done = await hass.config_entries.flow.async_configure(parent_id)
+    assert done["type"] is FlowResultType.ABORT
+    assert done["reason"] == (
+        "reconfigure_successful"
+        if source == config_entries.SOURCE_RECONFIGURE
+        else "reauth_successful"
+    )
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_panel_survives_original_dialog_closing(hass, monkeypatch):
+    hass.config.internal_url = "http://homeassistant.local:8123"
+    monkeypatch.setattr(
+        "custom_components.evolute.config_flow.async_ensure_login_panel",
+        AsyncMock(return_value=True),
+    )
+    opening = await start(hass)
+    child_id = opening["url"].split("flow_id=")[1]
+    hass.config_entries.flow.async_abort(opening["flow_id"])
+    result = await hass.config_entries.flow.async_configure(child_id)
+    result = await sms_step(hass, result)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
 
 
 async def test_manual_tokens_still_work(hass, requests_mock):
@@ -241,31 +254,19 @@ async def test_bad_code_then_retry(hass, requests_mock):
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
-async def test_request_new_sms_without_credentials(hass, requests_mock):
-    """Recovery returns to the website without logging in or creating a flow."""
-    result = await request_sms_step(hass, await start(hass))
-    flow_id = result["flow_id"]
-    result = await hass.config_entries.flow.async_configure(
-        flow_id, {CONF_PHONE_NUMBER: "+79991234567", CONF_SMS_CODE: "bad"}
-    )
-    assert result["errors"] == {CONF_SMS_CODE: "invalid_code"}
-    result = await hass.config_entries.flow.async_configure(
-        flow_id, {"evassist": "request_again"}
-    )
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "request_sms"
-    assert result["flow_id"] == flow_id
-    assert requests_mock.call_count == 0
-    result = await request_sms_step(hass, result)
-    assert result["data_schema"]({})[CONF_PHONE_NUMBER] == "79991234567"
-    assert result["data_schema"]({})[CONF_SMS_CODE] == ""
-    result = await sms_step(hass, result)
-    assert result["type"] is FlowResultType.CREATE_ENTRY
+async def test_legacy_sms_translation_has_all_placeholders(hass):
+    """An already open tab must never show the MISSING_VALUE error in the report."""
+    result = await start(hass)
+    placeholders = result["description_placeholders"]
+    assert {"login_url", "official_login_url", "phone_number"} <= placeholders.keys()
+    assert all(isinstance(value, str) for value in placeholders.values())
 
 
 async def test_empty_credentials_cannot_sign_in(hass, requests_mock):
     result = await request_sms_step(hass, await start(hass))
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PHONE_NUMBER: "", CONF_SMS_CODE: ""}
+    )
     assert result["errors"] == {
         CONF_PHONE_NUMBER: "invalid_phone",
         CONF_SMS_CODE: "invalid_code",

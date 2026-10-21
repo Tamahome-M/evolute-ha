@@ -1,0 +1,3 @@
+-r requirements-dev.txt
+home-assistant-frontend==20260930.4
+playwright==1.63.0

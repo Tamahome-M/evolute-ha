@@ -15,7 +15,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import EvolUteCoordinator
-from .login_ui import async_ensure_login_ui
+from .login_panel import async_ensure_login_panel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,8 +24,8 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Load the embedded field for Home Assistant's native setup dialog."""
-    await async_ensure_login_ui(hass)
+    """Restore the sign-in panel after Home Assistant restarts."""
+    await async_ensure_login_panel(hass)
     return True
 
 
