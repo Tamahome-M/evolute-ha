@@ -79,8 +79,7 @@
           "success": "Executed",
           "error": "Execution failed",
           "timeout": "Confirmation timed out",
-          "unconfirmed": "Outcome unknown",
-          "legacy_sent": "Sent without confirmation"
+          "unconfirmed": "Outcome unknown"
         }
       }
     }

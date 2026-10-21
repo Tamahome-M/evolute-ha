@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import requests
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -24,6 +25,7 @@ from custom_components.evolute.const import (
     CONF_REFRESH_TOKEN,
     DOMAIN,
     REFRESH_URL,
+    TELEMETRY_ACTIONS,
 )
 from custom_components.evolute.coordinator import EvolUteCoordinator
 from custom_components.evolute.lock import EvolUteLock
@@ -49,6 +51,12 @@ TELEMETRY = {
     }, {
         "tag": "trip-preparation", "enabled": True, "status": False,
         "activateCommand": "tripPreparationOn", "deactivateCommand": "tripPreparationOff",
+    }, {
+        "enabled": True, "status": False,
+        "activateCommand": "heatingOn", "deactivateCommand": "heatingOff",
+    }, {
+        "enabled": True, "status": False,
+        "activateCommand": "coolingOn", "deactivateCommand": "coolingOff",
     }],
     "firmwareCheck": {"actual": "old", "expected": "new", "mismatch": True},
     "settingsCheck": {"actual": "profile", "expected": "profile", "mismatch": False},
@@ -144,7 +152,7 @@ async def test_command_sensor_in_real_ha_service_flow(hass, command_coord, reque
         assert hass.states.get(lock.entity_id).state == "locked"
         assert state.attributes["options"] == [
             "idle", "sending", "pending", "delivered", "success", "error",
-            "timeout", "unconfirmed", "legacy_sent",
+            "timeout", "unconfirmed",
         ]
     finally:
         await hass.config_entries.async_unload(coord._entry.entry_id)
@@ -166,7 +174,7 @@ async def test_no_legacy_fallback_or_replay(command_coord, requests_mock, failur
     if failure == "malformed":
         requests_mock.post(COMMAND_URL, json={"accepted": True})
     with (
-        patch("custom_components.evolute.coordinator.COMMAND_CONFIRM_TIMEOUT", 0.01),
+        patch("custom_components.evolute.coordinator.COMMAND_CONFIRM_TIMEOUT", 0.1 if failure == "timeout" else 50),
         pytest.raises(HomeAssistantError),
     ):
         await coord.async_send_action("lock_close")
@@ -227,20 +235,54 @@ async def test_capability_and_current_state_checked_before_sending(command_coord
     assert not any(r.method == "POST" for r in requests_mock.request_history)
 
 
-async def test_legacy_commands_keep_their_payload_and_do_not_claim_execution(command_coord, requests_mock):
+@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.parametrize("action", [
+    "heating_on", "heating_off", "cooling_on", "cooling_off",
+    "trip_prepare_on", "trip_prepare_off",
+])
+async def test_climate_buttons_in_real_ha(hass, command_coord, requests_mock, action):
+    """Every dashboard mode uses one explicit POST and its own reported state."""
     coord = command_coord
-    coord.device_id = None
-    coord.data = {"sensors": {"centralLockingStatus": 0}}
-    url = f"{BASE_URL}/car-service/tbox/v1/car/centralLockingToggle"
-    requests_mock.post(url, status_code=204)
-    await coord.async_send_action("lock_close")
-    assert requests_mock.last_request.json() == {}
-    assert coord.last_command["status"] == "legacy_sent"
-    requests_mock.post(f"{BASE_URL}/car-service/tbox/v1/car/PREPARE", status_code=204)
-    coord.prepare_params.update(temp=25, fl=2)
-    await coord.async_prepare()
-    assert requests_mock.last_request.json()["value"]["temp"] == 25
-    assert requests_mock.last_request.json()["value"]["flSeatHeating"] == 2
+    coord.async_request_refresh = coord.async_refresh
+    telemetry = deepcopy(TELEMETRY)
+    telemetry["sensors"]["isCentralLockingOn"] = True
+    command = TELEMETRY_ACTIONS[action]
+    mode = next(b for b in telemetry["buttons"] if command in (
+        b["activateCommand"], b["deactivateCommand"],
+    ))
+    mode["status"] = action.endswith("_off")
+    requests_mock.get(TELEMETRY_URL, json=telemetry)
+
+    def executed(request, context):
+        mode["status"] = action.endswith("_on")
+        # Mode status can change without a new sensor timestamp.
+        requests_mock.get(TELEMETRY_URL, json=telemetry)
+        return {"commandId": "mode-command", "status": "success"}
+
+    requests_mock.post(COMMAND_URL, json={"commandId": "mode-command"})
+    requests_mock.get(STATUS_URL, json=executed)
+    with patch("custom_components.evolute.EvolUteCoordinator", return_value=coord):
+        assert await hass.config_entries.async_setup(coord._entry.entry_id)
+        await hass.async_block_till_done()
+    entities = er.async_entries_for_config_entry(er.async_get(hass), coord._entry.entry_id)
+    button = next(e for e in entities if e.domain == "button" and e.translation_key == action)
+    state_key = {"heating": "heating", "cooling": "cooling", "trip_prepare": "trip_preparation"}[
+        action.rsplit("_", 1)[0]
+    ]
+    sensor = next(e for e in entities if e.domain == "binary_sensor" and e.translation_key == state_key)
+    try:
+        await hass.services.async_call("button", "press", {"entity_id": button.entity_id}, blocking=True)
+        await hass.async_block_till_done()
+        posts = [r for r in requests_mock.request_history if r.method == "POST"]
+        assert len(posts) == 1
+        assert posts[0].url == COMMAND_URL
+        assert posts[0].json() == {"commandName": command, "imei": DEVICE}
+        assert coord.last_command["status"] == "success"
+        assert hass.states.get(sensor.entity_id).state == ("on" if action.endswith("_on") else "off")
+        assert coord.sensors["sensorDataTime"] == 1000
+    finally:
+        await hass.config_entries.async_unload(coord._entry.entry_id)
+        await hass.async_stop()
 
 
 async def test_profile_diagnostics_and_connection_refresh_at_same_timestamp(command_coord, requests_mock):

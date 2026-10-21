@@ -147,14 +147,12 @@ def test_invalid_car_list(requests_mock, payload):
         client.close()
 
 
-def test_empty_command_response(requests_mock):
-    """Authentication changes must preserve successful bodyless commands."""
-    url = f"{BASE_URL}/car-service/tbox/v1/car/blink"
-    requests_mock.post(url, status_code=204)
+def test_empty_command_status(requests_mock):
+    """No latest command is distinct from a malformed receipt."""
+    url = f"{BASE_URL}/client-bff-service/telemetry-commands/123456789012345"
+    requests_mock.get(url, status_code=204)
     client = EvolUteClient("car", "access", "refresh")
     try:
-        assert client.tbox_command("blink", timeout=60) is None
-        assert requests_mock.last_request.json() == {}
-        assert requests_mock.last_request.timeout == 60
+        assert client.fetch_command_status("123456789012345") is None
     finally:
         client.close()

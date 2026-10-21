@@ -129,17 +129,6 @@ class EvolUteClient:
     def _get(self, url: str) -> Any:
         return self._request_json("GET", url)
 
-    def _post(
-        self, url: str, payload: dict | None = None, timeout: int | None = None
-    ) -> Any:
-        return self._request_json(
-            "POST",
-            url,
-            payload or {},
-            timeout=timeout,
-            allow_empty=True,
-        )
-
     def fetch_cars(self) -> list[dict]:
         """List cars in the personal account using the app's paginated API."""
         cars: list[dict] = []
@@ -171,18 +160,8 @@ class EvolUteClient:
             if not rows:
                 raise EvolUteAPIError("Evolute API returned an incomplete car list")
 
-    def fetch_tbox_info(self) -> dict:
-        url = f"{BASE_URL}/car-service/tbox/{self.car_id}/info"
-        return self._get(url)
-
     def fetch_telemetry(self, device_id: str) -> dict:
-        """Fetch data from the new client-bff telemetry endpoint.
-
-        Unlike the tbox endpoints (which use the car id), this one is keyed
-        by the tbox device id (IMEI). Errors are normalised to
-        EvolUteAuthError / EvolUteAPIError so the coordinator can cleanly
-        fall back to the old API.
-        """
+        """Fetch current telemetry by device IMEI."""
         url = f"{BASE_URL}/client-bff-service/telemetry/{device_id}"
         return self._request_json("GET", url)
 
@@ -223,30 +202,14 @@ class EvolUteClient:
             raise EvolUteAPIError("Evolute API returned an invalid command status")
         return {"commandId": data["commandId"], "status": data["status"]}
 
-    def tbox_command(
-        self, endpoint: str, value: Any = None, timeout: int | None = None
-    ) -> Any:
-        """Send a remote command.
-
-        Commands go to the versioned endpoint
-        ``/car-service/tbox/v1/{car_id}/{command}``. For ordinary toggle/push
-        commands ``value`` is None and the body is empty (the server flips the
-        state by command name). For PREPARE, ``value`` is the heating/temp/time
-        object and is wrapped as ``{"value": value}`` — exactly like the app.
-        """
-        url = f"{BASE_URL}/car-service/tbox/v1/{self.car_id}/{endpoint}"
-        payload = {} if value is None else {"value": value}
-        return self._post(url, payload, timeout=timeout)
-
 
 # ---------------------------------------------------------------------------
 # Helpers for the new client-bff telemetry API (pure functions, no HA deps)
 # ---------------------------------------------------------------------------
 
-# Mapping of new telemetry keys → legacy tbox keys used by the existing
-# entities and by the INTELLIGENT_ACTIONS skip-logic. The second tuple item
-# tells whether the value must be coerced to a 0/1 int flag.
-_TELEMETRY_LEGACY_MAP: dict[str, tuple[str, bool]] = {
+# Normalised keys used by the existing entities. Keeping these internal names
+# preserves entity IDs; all values come from client-bff telemetry.
+_TELEMETRY_ENTITY_MAP: dict[str, tuple[str, bool]] = {
     "isIgnitionOn": ("ignitionStatus", True),
     "isCentralLockingOn": ("centralLockingStatus", True),
     "isTrunkOpen": ("trunkStatus", True),
@@ -268,9 +231,7 @@ def _as_int_flag(value: Any) -> int:
 def parse_telemetry(raw: Any) -> tuple[dict, dict] | None:
     """Validate + normalise a client-bff telemetry payload.
 
-    Returns ``(sensors, position)`` on success or ``None`` when the payload
-    does not look like a usable telemetry response (the caller then falls
-    back to the old tbox API).
+    Returns ``(sensors, position)`` on success or ``None`` for invalid telemetry.
     """
     if not isinstance(raw, dict):
         return None
@@ -289,9 +250,8 @@ def parse_telemetry(raw: Any) -> tuple[dict, dict] | None:
             continue
         sensors.setdefault(key, value)
 
-    # Legacy aliases so the existing entities and the toggle skip-logic keep
-    # working regardless of which API produced the data.
-    for new_key, (legacy_key, to_flag) in _TELEMETRY_LEGACY_MAP.items():
+    # Preserve entity keys while using the current telemetry field names.
+    for new_key, (legacy_key, to_flag) in _TELEMETRY_ENTITY_MAP.items():
         if new_key in sensors and legacy_key not in sensors:
             val = sensors[new_key]
             sensors[legacy_key] = _as_int_flag(val) if to_flag else val
@@ -300,7 +260,7 @@ def parse_telemetry(raw: Any) -> tuple[dict, dict] | None:
     # cooling button states in the same payload.
     if "climateStatus" not in sensors:
         climate_on = any(
-            btn.get("status")
+            _as_int_flag(btn.get("status"))
             and btn.get("activateCommand") in ("heatingOn", "coolingOn")
             for btn in buttons
             if isinstance(btn, dict)
@@ -339,10 +299,19 @@ def parse_telemetry(raw: Any) -> tuple[dict, dict] | None:
             if settings.get(src_key) is not None:
                 sensors[dst_key] = settings[src_key]
 
+    # These modes have separate states; climateStatus alone cannot tell which
+    # stop command the dashboard should send.
+    mode_keys = {
+        "heatingOn": "heatingRunning",
+        "coolingOn": "coolingRunning",
+        "tripPreparationOn": "tripPreparationRunning",
+    }
     for button in buttons:
-        if isinstance(button, dict) and button.get("tag") == "trip-preparation":
-            sensors["tripPreparationRunning"] = _as_int_flag(button.get("status"))
-            break
+        if not isinstance(button, dict):
+            continue
+        key = mode_keys.get(button.get("activateCommand"))
+        if key and button.get("status") is not None:
+            sensors[key] = _as_int_flag(button["status"])
 
     # Signal quality in percent: signalLevel is the modem CSQ value
     # (0–31, 99 = unknown/undetectable). The app renders it as
@@ -369,11 +338,11 @@ def parse_telemetry(raw: Any) -> tuple[dict, dict] | None:
 
 
 def find_device_id(*payloads: Any) -> str | None:
-    """Best-effort search for the tbox device id (IMEI) in API payloads.
+    """Best-effort search for the device IMEI in car information.
 
     The new telemetry endpoint is keyed by a 15-digit device id rather than
     the car id, and the id is not entered by the user — so we hunt for it in
-    the tbox / car-info responses. Preference order: keys containing
+    the car-info response. Preference order: keys containing
     ``imei`` → device/tbox/terminal-like keys → any bare 15–17 digit value.
     """
     by_key: list[str] = []
