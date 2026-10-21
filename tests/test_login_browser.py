@@ -20,8 +20,19 @@ pytestmark = [
 ]
 
 
+@pytest.mark.parametrize(
+    "viewport",
+    [{"width": 1280, "height": 1000}, {"width": 390, "height": 844}],
+    ids=["desktop", "mobile"],
+)
 async def test_first_sms_choice_opens_working_panel(
-    hass, hass_client, hass_access_token, hass_storage, requests_mock, mock_setup_entry
+    hass,
+    hass_client,
+    hass_access_token,
+    hass_storage,
+    requests_mock,
+    mock_setup_entry,
+    viewport,
 ):
     """Reproduce the reported path without preloading any Evolute JS module."""
     playwright = pytest.importorskip("playwright.async_api")
@@ -40,13 +51,11 @@ async def test_first_sms_choice_opens_working_panel(
             "total": 1,
         },
     )
-    artifacts = Path("artifacts")
-    artifacts.mkdir(exist_ok=True)
+    artifacts = Path("artifacts") / str(viewport["width"])
+    artifacts.mkdir(parents=True, exist_ok=True)
     async with playwright.async_playwright() as driver:
         browser = await driver.chromium.launch(args=["--no-sandbox"])
-        context = await browser.new_context(
-            locale="ru-RU", viewport={"width": 1280, "height": 1000}
-        )
+        context = await browser.new_context(locale="ru-RU", viewport=viewport)
         # Only the third-party SMS/CAPTCHA page and vehicle API are mocked.
         # HA's frontend, authentication, HTTP API and panel loader are real.
         await context.route(
@@ -91,17 +100,29 @@ async def test_first_sms_choice_opens_working_panel(
         panel = await opened.value
         panel.on("pageerror", lambda error: errors.append(str(error)))
         await panel.wait_for_load_state()
-        await panel.locator("evolute-login-panel-v6 iframe").wait_for(
+        await panel.locator("evolute-login-panel-v7 iframe").wait_for(
             state="visible", timeout=45000
         )
-        assert not await panel.get_by_label("Номер телефона", exact=True).is_visible()
-        await panel.screenshot(path=str(artifacts / "login-request.png"))
+        phone = panel.get_by_label("Номер телефона", exact=True)
+        code = panel.get_by_label("Код из СМС", exact=True)
+        assert await phone.is_visible() and await code.is_visible()
+        assert await phone.is_enabled() and await code.is_enabled()
+        assert (
+            await panel.get_by_role("button", name=re.compile("СМС получено")).count()
+            == 0
+        )
+        frame_box = await panel.locator("iframe").bounding_box()
+        phone_box = await phone.bounding_box()
+        assert phone_box["y"] >= frame_box["y"] + frame_box["height"]
+        assert phone_box["x"] >= 0
+        assert phone_box["x"] + phone_box["width"] <= viewport["width"]
+        await panel.screenshot(path=str(artifacts / "login-screen.png"), full_page=True)
         frame = panel.frame_locator("iframe")
         await frame.get_by_role("button", name="Запросить СМС").click()
-        await panel.get_by_role("button", name=re.compile("СМС получено")).click()
-        assert await panel.locator("iframe").count() == 0
-        await panel.get_by_label("Номер телефона", exact=True).fill("+79991234567")
-        await panel.get_by_label("Код из СМС", exact=True).fill("0123")
+        await phone.fill("+79991234567")
+        await code.fill("0123")
+        assert await panel.locator("iframe").count() == 1
+        assert await frame.get_by_text("СМС отправлена", exact=True).count() == 1
         await panel.screenshot(path=str(artifacts / "login-code.png"))
         await panel.get_by_role("button", name="Войти", exact=True).click()
         await panel.wait_for_url(

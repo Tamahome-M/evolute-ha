@@ -2,7 +2,7 @@
 const LOGIN_URL = "https://app.evassist.ru/login";
 const INTEGRATIONS_URL = "/config/integrations";
 const EVOLUTE_SETTINGS_URL = `${INTEGRATIONS_URL}/integration/evolute`;
-const PANEL_ELEMENT = "evolute-login-panel-v6";
+const PANEL_ELEMENT = "evolute-login-panel-v7";
 
 const TEXT = {
   ru: {
@@ -10,8 +10,7 @@ const TEXT = {
     back: "Настройки интеграций",
     loading: "Загрузка настройки…",
     request: "1. Запросите СМС",
-    requestHelp: "Введите номер в форме ниже, пройдите капчу и запросите СМС. Код на странице EVAssist не вводите. Когда сообщение придёт, нажмите «СМС получено» — на следующем шаге укажите номер и код вместе.",
-    received: "СМС получено — ввести код в HA",
+    requestHelp: "Введите номер в форме EVAssist ниже, пройдите капчу и запросите СМС. Полученный код вводите только в поля Home Assistant под формой сайта, вместе с тем же номером телефона.",
     requestAgain: "Запросить новую СМС",
     recovery: "Вижу «Выберите аккаунт», автомобили или уже ввёл код на сайте",
     recoveryHelp: "Сайт EVAssist может восстановить прежний вход вместо формы телефона. Код, уже введённый на сайте, использован — для Home Assistant нужен новый.",
@@ -22,14 +21,14 @@ const TEXT = {
     resetting: "Сбрасываем встроенный вход…",
     restarted: "Страница EVAssist открыта заново. Если выбор аккаунта остался, используйте инструкцию восстановления ниже.",
     finish: "2. Введите номер и код в Home Assistant",
-    codeHelp: "Укажите тот же номер и код из СМС — интеграция получит сессию и найдёт автомобиль. Если код уже использован на сайте, запросите новую СМС кнопкой ниже.",
+    codeHelp: "После запроса СМС в форме выше укажите здесь тот же номер и полученный 4-значный код, затем нажмите «Войти». Код на сайте EVAssist не вводите. Если уже использовали его на сайте, запросите новую СМС.",
     code: "Код из СМС",
     phone: "Номер телефона",
     invalid_phone: "Введите корректный номер телефона с кодом страны.",
     signIn: "Войти",
     working: "Подключение…",
     fallback: "Если встроенная страница не работает, откройте официальный сайт",
-    fallbackHelp: "Запросите СМС в приватном окне, вернитесь и нажмите «СМС получено». Код на сайте вводить не нужно.",
+    fallbackHelp: "Запросите СМС в приватном окне, затем введите номер и код в поля Home Assistant на этой странице. Код на сайте вводить не нужно.",
     car: "Выберите автомобиль",
     connect: "Подключить",
     retry: "Повторить загрузку автомобилей",
@@ -54,8 +53,7 @@ const TEXT = {
     back: "Integration settings",
     loading: "Loading setup…",
     request: "1. Request an SMS",
-    requestHelp: "Enter your phone number below, complete the CAPTCHA and request an SMS. Do not enter the code on the EVAssist page. When it arrives, press 'SMS received' to enter the phone number and code together on the next step.",
-    received: "SMS received — enter the code in HA",
+    requestHelp: "Enter your phone number in the EVAssist form below, complete the CAPTCHA and request an SMS. Enter the received code only in the Home Assistant fields below the website, together with the same phone number.",
     requestAgain: "Request another SMS",
     recovery: "I see 'Choose an account', my cars or entered the code on the website",
     recoveryHelp: "EVAssist may restore a previous sign-in instead of the phone form. A code entered on the website has already been used — Home Assistant needs a new one.",
@@ -66,14 +64,14 @@ const TEXT = {
     resetting: "Resetting the embedded sign-in…",
     restarted: "The EVAssist page has been reopened. If account selection is still shown, follow the recovery instructions below.",
     finish: "2. Enter phone and code in Home Assistant",
-    codeHelp: "Enter the same phone number and SMS code here so the integration can sign in and find your car. If you used the code on the website, request another SMS with the button below.",
+    codeHelp: "After requesting an SMS in the form above, enter the same phone number and the 4-digit code here, then press 'Sign in'. Do not enter the code on EVAssist. If you already used it on the website, request another SMS.",
     code: "SMS code",
     phone: "Phone number",
     invalid_phone: "Enter a valid phone number with country code.",
     signIn: "Sign in",
     working: "Connecting…",
     fallback: "If the embedded page does not work, open the official website",
-    fallbackHelp: "Request an SMS in a private window, return and press 'SMS received'. Do not enter the code on the website.",
+    fallbackHelp: "Request an SMS in a private window, then enter the phone number and code in the Home Assistant fields on this page. Do not enter the code on the website.",
     car: "Choose your car",
     connect: "Connect",
     retry: "Retry loading cars",
@@ -102,7 +100,6 @@ class EvoluteLoginPanel extends HTMLElement {
     this._step = null;
     this._busy = false;
     this._started = false;
-    this._smsStage = null;
     this._isolatedLogin = "credentialless" in document.createElement("iframe");
   }
 
@@ -169,7 +166,6 @@ class EvoluteLoginPanel extends HTMLElement {
         button { margin-top: 16px; border: 0; background: var(--primary-color, #03a9f4); color: var(--text-primary-color, white); cursor: pointer; }
         button:disabled { opacity: .6; cursor: wait; }
         button.secondary { background: transparent; color: var(--primary-color, #03a9f4); border: 1px solid var(--divider-color, #ddd); }
-        #received { margin: 0 0 16px; width: 100%; }
         #entry form { max-width: 480px; }
         details { margin: 16px 0; }
         summary { cursor: pointer; color: var(--primary-color, #03a9f4); }
@@ -186,23 +182,15 @@ class EvoluteLoginPanel extends HTMLElement {
       <header><a href="${INTEGRATIONS_URL}" id="back"></a><h1></h1></header>
       <main>
         <p id="status" role="status"></p>
-        <p id="error" role="alert" hidden></p>
         <div class="columns" hidden>
           <section id="official">
             <h2 id="request-title"></h2><p id="instructions"></p>
-            <button id="received" type="button"></button>
             <div id="frame"></div>
-            <details id="recovery">
-              <summary id="recovery-title"></summary>
-              <p id="recovery-help"></p><p class="help" id="session-help"></p>
-              <button id="restart" type="button" class="secondary"></button>
-            </details>
-            <a href="${LOGIN_URL}" target="_blank" rel="noopener noreferrer" id="fallback"></a>
-            <p class="help" id="fallback-help"></p>
           </section>
           <section id="entry">
             <h2 id="form-title"></h2>
             <p id="code-help"></p>
+            <p id="error" role="alert" hidden></p>
             <form>
               <div id="phone-field"><label for="phone-number"></label>
                 <input id="phone-number" name="phone_number" type="tel" autocomplete="tel" required>
@@ -216,13 +204,22 @@ class EvoluteLoginPanel extends HTMLElement {
             </form>
             <button id="request-again" type="button" class="secondary"></button>
           </section>
+          <div id="help">
+            <details id="recovery">
+              <summary id="recovery-title"></summary>
+              <p id="recovery-help"></p><p class="help" id="session-help"></p>
+              <button id="restart" type="button" class="secondary"></button>
+            </details>
+            <a href="${LOGIN_URL}" target="_blank" rel="noopener noreferrer" id="fallback"></a>
+            <p class="help" id="fallback-help"></p>
+          </div>
         </div>
       </main>`;
     for (const [id, key] of Object.entries({
       back: "back", "request-title": "request",
       "session-help": this._isolatedLogin ? "isolatedHelp" : "sessionHelp",
       fallback: "fallback", "fallback-help": "fallbackHelp",
-      received: "received", "recovery-title": "recovery", "recovery-help": "recoveryHelp",
+      "recovery-title": "recovery", "recovery-help": "recoveryHelp",
       restart: this._isolatedLogin ? "reset" : "restart",
       "code-help": "codeHelp", "request-again": "requestAgain",
     })) this._element(id).textContent = this._text(key);
@@ -233,13 +230,6 @@ class EvoluteLoginPanel extends HTMLElement {
     this.shadowRoot.querySelector("form").addEventListener("submit", (event) => {
       event.preventDefault();
       this._submit();
-    });
-    this._element("received").addEventListener("click", () => {
-      if (this._busy || this._step !== "sms") return;
-      this._element("status").hidden = true;
-      this._element("error").hidden = true;
-      this._showSmsStage("code");
-      this._element("sms-code").focus();
     });
     for (const id of ["restart", "request-again"]) {
       this._element(id).addEventListener("click", () => this._restartRequest());
@@ -258,7 +248,6 @@ class EvoluteLoginPanel extends HTMLElement {
     this._element("frame").replaceChildren();
     this._element("sms-code").value = "";
     this._step = null;
-    this._smsStage = null;
     this._element("error").hidden = true;
   }
 
@@ -300,6 +289,7 @@ class EvoluteLoginPanel extends HTMLElement {
     this._element("form-title").textContent = this._text(sms ? "finish" : "car");
     this._element("code-help").hidden = !sms;
     this._element("request-again").hidden = !sms;
+    this._element("help").hidden = !sms;
     if (sms) {
       if (!this._element("phone-number").value) {
         const field = result.data_schema?.find((item) => item.name === "phone_number");
@@ -308,9 +298,8 @@ class EvoluteLoginPanel extends HTMLElement {
       const phone = result.description_placeholders?.phone_number || "";
       this._element("instructions").textContent = this._text("requestHelp", phone);
       this.shadowRoot.querySelector("label[for='sms-code']").textContent = this._text("code", phone);
-      this._showSmsStage(this._smsStage || "request");
+      this._showSmsForm();
     } else {
-      this._smsStage = null;
       this._element("official").hidden = true;
       this._element("entry").hidden = false;
       this._element("frame").replaceChildren();
@@ -336,41 +325,33 @@ class EvoluteLoginPanel extends HTMLElement {
     button.disabled = busy;
     button.textContent = this._text(busy ? "working" : this._step === "sms"
       ? "signIn" : this._element("car-id").options.length ? "connect" : "retry");
-    for (const id of ["received", "restart", "request-again"]) {
+    for (const id of ["restart", "request-again"]) {
       this._element(id).disabled = busy;
     }
-    this._element("sms-code").disabled = busy || this._step !== "sms" || this._smsStage !== "code";
-    this._element("phone-number").disabled = busy || this._step !== "sms" || this._smsStage !== "code";
+    this._element("sms-code").disabled = busy || this._step !== "sms";
+    this._element("phone-number").disabled = busy || this._step !== "sms";
     this._element("car-id").disabled = busy || this._step !== "select_car";
   }
 
-  _showSmsStage(stage) {
-    this._smsStage = stage;
-    const request = stage === "request";
-    this._element("official").hidden = !request;
-    this._element("entry").hidden = request;
-    if (request) {
-      this._element("sms-code").value = "";
-      if (!this._element("frame").firstChild) {
-        const frame = document.createElement("iframe");
-        frame.title = this._text("request");
-        // EVAssist persists authentication in localStorage. Supporting browsers
-        // give this frame storage separate from the user's saved website login.
-        if (this._isolatedLogin) frame.credentialless = true;
-        frame.src = LOGIN_URL;
-        frame.referrerPolicy = "no-referrer";
-        frame.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin");
-        this._element("frame").append(frame);
-      }
-    } else {
-      // Remove the website's code form before focusing Home Assistant's field.
-      this._element("frame").replaceChildren();
+  _showSmsForm() {
+    this._element("official").hidden = false;
+    this._element("entry").hidden = false;
+    if (!this._element("frame").firstChild) {
+      const frame = document.createElement("iframe");
+      frame.title = this._text("request");
+      // Preserve EVAssist's origin and its isolated storage when supported.
+      if (this._isolatedLogin) frame.credentialless = true;
+      frame.src = LOGIN_URL;
+      frame.referrerPolicy = "no-referrer";
+      frame.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin");
+      this._element("frame").append(frame);
     }
     this._setBusy(this._busy);
   }
 
   _restartRequest() {
     if (this._busy || this._step !== "sms") return;
+    this._element("sms-code").value = "";
     if (this._isolatedLogin) {
       // Credentialless frames share a storage nonce for the top-level document.
       // Remounting the frame reuses it; reloading HA creates a fresh nonce while
@@ -381,14 +362,13 @@ class EvoluteLoginPanel extends HTMLElement {
     }
     this._element("frame").replaceChildren();
     this._element("error").hidden = true;
-    this._showSmsStage("request");
+    this._showSmsForm();
     this._element("status").textContent = this._text("restarted");
     this._element("status").hidden = false;
   }
 
   async _submit() {
     if (this._busy || !this._step) return;
-    if (this._step === "sms" && this._smsStage !== "code") return;
     const data = {};
     if (this._step === "sms") {
       const phone = this._element("phone-number").value.trim();
