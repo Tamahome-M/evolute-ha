@@ -11,11 +11,10 @@
       },
       "sms": {
         "title": "Phone number and SMS code",
-        "description": "Enter the same phone number you used to request the SMS and the 4-digit code. Home Assistant will sign in and receive the tokens automatically.",
+        "description": "Request an SMS on the [sign-in screen]({login_url}), then enter the same phone number and 4-digit code here. Do not enter the code on the EVAssist website. If the embedded form does not work, request an SMS on the [official website]({official_login_url}) in a private window.",
         "data": {
           "phone_number": "Phone number",
-          "sms_code": "SMS code",
-          "evassist": "EVAssist"
+          "sms_code": "SMS code"
         },
         "submit": "Sign in"
       },
@@ -32,16 +31,7 @@
         "title": "Select your car",
         "description": "Choose a car from your account. If loading failed, submit this step again to retry without requesting another SMS code.",
         "data": {
-          "car_id": "Car",
-          "evassist": "EVAssist"
-        }
-      },
-      "request_sms": {
-        "title": "Request an SMS",
-        "description": "Enter your phone number in the EVAssist form below, complete the CAPTCHA and request an SMS. **Do not enter the code on the website.** Once the SMS arrives, press “SMS received” at the bottom of this dialog. Enter the phone number and code together on the next HA step.\n\nIf the form is missing, reload the HA tab. You can also request the SMS on the [official website]({official_login_url}) in a private window.",
-        "submit": "SMS received",
-        "data": {
-          "evassist": "EVAssist"
+          "car_id": "Car"
         }
       }
     },

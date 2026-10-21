@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from contextlib import suppress
 from typing import Any
 
 try:
@@ -14,7 +15,12 @@ except ImportError:
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import (
+    AbortFlow,
+    FlowResult,
+    FlowResultType,
+    UnknownFlow,
+)
 from homeassistant.helpers import selector
 
 from .api import (
@@ -38,7 +44,7 @@ from .const import (
     DOMAIN,
     LOGIN_PAGE_URL,
 )
-from .login_ui import EvoluteLoginSelector, async_ensure_login_ui
+from .login_panel import PANEL_PATH, async_ensure_login_panel
 
 
 def _normalize_phone(value: str) -> str:
@@ -117,32 +123,82 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._tokens: dict[str, str] = {}
         self._cars: dict[str, dict] = {}
         self._entry: config_entries.ConfigEntry | None = None
+        self._panel_flow_id: str | None = None
+        self._panel_outcome: str | None = None
 
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
         """Choose between SMS authentication and manually supplied tokens."""
         return self.async_show_menu(step_id="user", menu_options=["phone", "token"])
 
     async def async_step_phone(self, user_input: dict | None = None) -> FlowResult:
-        """Open the official SMS request form inside the current HA dialog."""
-        await async_ensure_login_ui(self.hass)
-        return await self.async_step_request_sms()
+        """Open the working HA panel using the native external-step mechanism."""
+        if not self.context.get(
+            "evolute_panel_login"
+        ) and await async_ensure_login_panel(self.hass):
+            manager = self.hass.config_entries.flow
+            context = {
+                **self.context,
+                "evolute_panel_login": True,
+                "evolute_parent_flow_id": self.flow_id,
+            }
+            initial_data = (
+                self._entry.data
+                if self._entry is not None
+                and context["source"] == config_entries.SOURCE_REAUTH
+                else None
+            )
+            result = await manager.async_init(
+                DOMAIN, context=context, data=initial_data
+            )
+            if result["type"] is FlowResultType.ABORT:
+                return self.async_abort(reason=result["reason"])
+            self._panel_flow_id = result["flow_id"]
+            await manager.async_configure(
+                self._panel_flow_id, {"next_step_id": "phone"}
+            )
+            return await self.async_step_embedded()
+        return await self.async_step_sms()
 
-    async def async_step_request_sms(
-        self, user_input: dict | None = None
-    ) -> FlowResult:
-        """Request the SMS before collecting the phone and code together."""
+    async def async_step_embedded(self, user_input: dict | None = None) -> FlowResult:
+        """HA opens the panel itself, without a confirmation/handoff form."""
         if user_input is not None:
-            return await self.async_step_sms()
-        return self.async_show_form(
-            step_id="request_sms",
-            data_schema=vol.Schema(
-                {vol.Optional("evassist"): self._login_selector("request")}
-            ),
-            description_placeholders={"official_login_url": LOGIN_PAGE_URL},
+            self._panel_outcome = user_input.get("panel_outcome")
+        if self._panel_outcome is not None:
+            return self.async_external_step_done(next_step_id="embedded_done")
+        return self.async_external_step(
+            step_id="embedded",
+            url=f"/{PANEL_PATH}?flow_id={self._panel_flow_id}",
         )
 
-    def _login_selector(self, mode: str) -> EvoluteLoginSelector:
-        return EvoluteLoginSelector({"flow_id": self.flow_id, "mode": mode})
+    async def async_step_embedded_done(
+        self, user_input: dict | None = None
+    ) -> FlowResult:
+        """The continued flow has already saved the car or reported its error."""
+        return self.async_abort(reason=self._panel_outcome or "reauth_successful")
+
+    @callback
+    def async_abort(self, *, reason: str, **kwargs: Any) -> FlowResult:
+        """Keep the result for the native dialog while HA finishes this flow."""
+        self._panel_outcome = reason
+        return super().async_abort(reason=reason, **kwargs)
+
+    @callback
+    def async_remove(self) -> None:
+        """Notify the opening dialog only after the continued flow has finished."""
+        parent_id = self.context.get("evolute_parent_flow_id")
+        if not parent_id or self._panel_outcome is None:
+            return
+        self.hass.async_create_task(
+            self._async_complete_parent(parent_id, self._panel_outcome),
+            "Complete Evolute opening dialog",
+        )
+
+    async def _async_complete_parent(self, parent_id: str, outcome: str) -> None:
+        # Closing the original dialog must not delete the working panel flow.
+        with suppress(UnknownFlow):
+            await self.hass.config_entries.flow.async_configure(
+                parent_id, {"panel_outcome": outcome}
+            )
 
     async def async_step_token(self, user_input: dict | None = None) -> FlowResult:
         """Keep manual token authentication available for setup and recovery."""
@@ -197,28 +253,28 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ): selector.TextSelector(
                         selector.TextSelectorConfig(type=selector.TextSelectorType.TEL)
                     ),
-                    # Empty defaults let the recovery action go back without
-                    # submitting credentials. Both fields are validated below.
-                    vol.Required(CONF_SMS_CODE, default=""): selector.TextSelector(
+                    vol.Required(CONF_SMS_CODE): selector.TextSelector(
                         selector.TextSelectorConfig(
                             type=selector.TextSelectorType.PASSWORD,
                             autocomplete="one-time-code",
                         )
                     ),
-                    vol.Optional("evassist"): self._login_selector("actions"),
                 }
             ),
             errors=errors,
+            # Older open HA tabs may still have the previous SMS translation.
+            # Supply its placeholders too; never expose a format error to users.
+            description_placeholders={
+                "login_url": f"/{PANEL_PATH}?flow_id={self.flow_id}",
+                "official_login_url": LOGIN_PAGE_URL,
+                "phone_number": f"+{self._phone}" if self._phone else "",
+            },
         )
 
     async def async_step_sms(self, user_input: dict | None = None) -> FlowResult:
         """Exchange a one-time code; never store the code in the config entry."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            if user_input.get("evassist") == "request_again":
-                self._tokens = {}
-                self._cars = {}
-                return await self.async_step_request_sms()
             try:
                 self._phone = _normalize_phone(user_input[CONF_PHONE_NUMBER])
             except ValueError:
@@ -284,7 +340,6 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             for car_id, car in self._cars.items()
         }
         fields = {vol.Required(CONF_CAR_ID): vol.In(choices)} if choices else {}
-        fields[vol.Optional("evassist")] = self._login_selector("status")
         return self.async_show_form(
             step_id="select_car",
             data_schema=vol.Schema(fields),
@@ -329,7 +384,12 @@ class EvolUteConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             await self.hass.config_entries.async_reload(self._entry.entry_id)
             return self.async_abort(reason=reason)
-        self._abort_if_unique_id_configured()
+        try:
+            self._abort_if_unique_id_configured()
+        except AbortFlow as err:
+            self._panel_outcome = err.reason
+            raise
+        self._panel_outcome = "reauth_successful"
         return self.async_create_entry(
             title=_car_title(self._cars[car_id]),
             data={**data, CONF_CAR_ID: car_id},
