@@ -184,27 +184,44 @@ class EvolUteClient:
         fall back to the old API.
         """
         url = f"{BASE_URL}/client-bff-service/telemetry/{device_id}"
-        try:
-            resp = self._session.get(
-                url,
-                cookies=self._cookies(),
-                headers={"x-app": "web", "Accept": "*/*"},
-                timeout=self.timeout,
-            )
-        except requests.RequestException as exc:
-            raise EvolUteAPIError(f"Telemetry network error: {exc}") from exc
-        if resp.status_code == 401:
-            raise EvolUteAuthError("Access denied (401). Tokens expired.")
-        if not resp.ok:
-            raise EvolUteAPIError(f"Telemetry HTTP {resp.status_code}")
-        try:
-            return resp.json()
-        except ValueError as exc:
-            raise EvolUteAPIError(f"Telemetry returned invalid JSON: {exc}") from exc
+        return self._request_json("GET", url)
 
     def fetch_car_info(self) -> dict:
         url = f"{BASE_URL}/car-service/car/v2/{self.car_id}"
         return self._get(url)
+
+    def send_telemetry_command(self, device_id: str, command: str) -> str:
+        """Submit once; an accepted command is not yet an executed command."""
+        data = self._request_json(
+            "POST",
+            f"{BASE_URL}/client-bff-service/telemetry-commands",
+            {"commandName": command, "imei": device_id},
+        )
+        if (
+            not isinstance(data, dict)
+            or not isinstance(data.get("commandId"), str)
+            or not data["commandId"].strip()
+        ):
+            raise EvolUteAPIError("Evolute API did not return a command id")
+        return data["commandId"]
+
+    def fetch_command_status(self, device_id: str) -> dict | None:
+        """The endpoint returns the device's latest command, not one by UUID."""
+        data = self._request_json(
+            "GET",
+            f"{BASE_URL}/client-bff-service/telemetry-commands/{device_id}",
+            allow_empty=True,
+        )
+        if data is None:
+            return None
+        if (
+            not isinstance(data, dict)
+            or not isinstance(data.get("commandId"), str)
+            or not data["commandId"].strip()
+            or data.get("status") not in {"pending", "delivered", "success", "error"}
+        ):
+            raise EvolUteAPIError("Evolute API returned an invalid command status")
+        return {"commandId": data["commandId"], "status": data["status"]}
 
     def tbox_command(
         self, endpoint: str, value: Any = None, timeout: int | None = None
@@ -262,6 +279,8 @@ def parse_telemetry(raw: Any) -> tuple[dict, dict] | None:
         return None
 
     sensors = dict(src)
+    buttons = raw.get("buttons")
+    buttons = buttons if isinstance(buttons, list) else []
 
     # Merge scalar meta fields from the top level (isOnline, onlineState,
     # isCarStateReady, carStateUpdatedAt, …).
@@ -283,7 +302,7 @@ def parse_telemetry(raw: Any) -> tuple[dict, dict] | None:
         climate_on = any(
             btn.get("status")
             and btn.get("activateCommand") in ("heatingOn", "coolingOn")
-            for btn in raw.get("buttons", [])
+            for btn in buttons
             if isinstance(btn, dict)
         )
         sensors["climateStatus"] = 1 if climate_on else 0
@@ -309,6 +328,21 @@ def parse_telemetry(raw: Any) -> tuple[dict, dict] | None:
         version = fw.get("actual") or fw.get("expected")
         if version:
             sensors["firmwareVersionText"] = version
+
+    settings = raw.get("settingsCheck")
+    if isinstance(settings, dict):
+        for src_key, dst_key in (
+            ("actual", "settingsActual"),
+            ("expected", "settingsExpected"),
+            ("mismatch", "settingsMismatch"),
+        ):
+            if settings.get(src_key) is not None:
+                sensors[dst_key] = settings[src_key]
+
+    for button in buttons:
+        if isinstance(button, dict) and button.get("tag") == "trip-preparation":
+            sensors["tripPreparationRunning"] = _as_int_flag(button.get("status"))
+            break
 
     # Signal quality in percent: signalLevel is the modem CSQ value
     # (0–31, 99 = unknown/undetectable). The app renders it as

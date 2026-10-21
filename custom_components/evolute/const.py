@@ -36,7 +36,33 @@ REFRESH_URL = f"{BASE_URL}/id-service/auth/refresh-token"
 COMMAND_TIMEOUT = 20
 PREPARE_TIMEOUT = 60
 
-# Toggle/push commands. These hit POST /car-service/tbox/v1/{car_id}/{command}
+# The web app polls the last command by IMEI every 1.5 seconds. The backend
+# reports an error if the vehicle has not confirmed execution within 45 s.
+COMMAND_POLL_INTERVAL = 1.5
+COMMAND_CONFIRM_TIMEOUT = 50
+COMMAND_STATES = [
+    "idle", "sending", "pending", "delivered", "success", "error", "timeout",
+    "unconfirmed", "legacy_sent",
+]
+
+# Explicit commands from client-bff telemetry.buttons. These set a desired
+# state and do not depend on a potentially stale local toggle state.
+TELEMETRY_ACTIONS = {
+    "lock_close": "centralLockingOn",
+    "lock_open": "centralLockingOff",
+    "heating_on": "heatingOn",
+    "heating_off": "heatingOff",
+    "cooling_on": "coolingOn",
+    "cooling_off": "coolingOff",
+    "trunk_open": "trunkOpen",
+    "trunk_close": "trunkClose",
+    "blink": "search",
+    "trip_prepare_on": "tripPreparationOn",
+    "trip_prepare_off": "tripPreparationOff",
+}
+
+# Legacy toggle/push commands, retained for cars without a discovered IMEI.
+# These hit POST /car-service/tbox/v1/{car_id}/{command}
 # with an empty body — the server flips the state based on the command name,
 # so the "skip if already in target state" value guards against an accidental
 # double-toggle. The command names below are the real ones returned in the
