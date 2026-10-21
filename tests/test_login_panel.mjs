@@ -46,7 +46,7 @@ async function screen(t, responses, { admin = true, url, language = "ru", isolat
       return typeof next === "function" ? next() : next;
     },
   };
-  const panel = window.document.createElement("evolute-login-panel-v7");
+  const panel = window.document.createElement("evolute-login-panel-v8");
   window.document.body.append(panel);
   panel.hass = hass;
   await flush();
@@ -69,7 +69,7 @@ test("requests SMS without the saved EVAssist login and finishes the same HA flo
   assert.equal(frame.referrerPolicy, "no-referrer");
   assert.equal(frame.credentialless, true);
   assert.equal(frame.getAttribute("sandbox"), "allow-scripts allow-forms allow-same-origin");
-  assert.match(root.getElementById("instructions").textContent, /Home Assistant под формой сайта/);
+  assert.match(root.getElementById("code-notice").textContent, /Home Assistant под формой сайта/);
   assert.equal(root.getElementById("back").target, "");
   panel.hass = { ...hass, states: {} };
   await flush();
@@ -229,7 +229,7 @@ test("restart reopens the official login page without restarting HA setup", asyn
   assert.equal(root.getElementById("sms-code").disabled, false);
   assert.equal(calls.length, 1);
   assert.equal(reloads.length, 0);
-  assert.match(root.getElementById("instructions").textContent, /Home Assistant под формой сайта/);
+  assert.match(root.getElementById("code-notice").textContent, /Home Assistant под формой сайта/);
   assert.match(root.getElementById("status").textContent, /открыта заново/);
   assert.match(root.getElementById("session-help").textContent, /локальное хранилище/);
   assert.match(root.getElementById("session-help").textContent, /приватном окне/);

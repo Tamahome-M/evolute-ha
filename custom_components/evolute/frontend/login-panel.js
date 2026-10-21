@@ -2,7 +2,7 @@
 const LOGIN_URL = "https://app.evassist.ru/login";
 const INTEGRATIONS_URL = "/config/integrations";
 const EVOLUTE_SETTINGS_URL = `${INTEGRATIONS_URL}/integration/evolute`;
-const PANEL_ELEMENT = "evolute-login-panel-v7";
+const PANEL_ELEMENT = "evolute-login-panel-v8";
 
 const TEXT = {
   ru: {
@@ -10,7 +10,8 @@ const TEXT = {
     back: "Настройки интеграций",
     loading: "Загрузка настройки…",
     request: "1. Запросите СМС",
-    requestHelp: "Введите номер в форме EVAssist ниже, пройдите капчу и запросите СМС. Полученный код вводите только в поля Home Assistant под формой сайта, вместе с тем же номером телефона.",
+    requestHelp: "Введите номер в форме EVAssist ниже, пройдите капчу и запросите СМС.",
+    codeNotice: "Полученный код вводите только в поля Home Assistant под формой сайта, вместе с тем же номером телефона.",
     requestAgain: "Запросить новую СМС",
     recovery: "Вижу «Выберите аккаунт», автомобили или уже ввёл код на сайте",
     recoveryHelp: "Сайт EVAssist может восстановить прежний вход вместо формы телефона. Код, уже введённый на сайте, использован — для Home Assistant нужен новый.",
@@ -53,7 +54,8 @@ const TEXT = {
     back: "Integration settings",
     loading: "Loading setup…",
     request: "1. Request an SMS",
-    requestHelp: "Enter your phone number in the EVAssist form below, complete the CAPTCHA and request an SMS. Enter the received code only in the Home Assistant fields below the website, together with the same phone number.",
+    requestHelp: "Enter your phone number in the EVAssist form below, complete the CAPTCHA and request an SMS.",
+    codeNotice: "Enter the received code only in the Home Assistant fields below the website, together with the same phone number.",
     requestAgain: "Request another SMS",
     recovery: "I see 'Choose an account', my cars or entered the code on the website",
     recoveryHelp: "EVAssist may restore a previous sign-in instead of the phone form. A code entered on the website has already been used — Home Assistant needs a new one.",
@@ -152,7 +154,7 @@ class EvoluteLoginPanel extends HTMLElement {
         header, main { max-width: 800px; margin: auto; padding: 20px; }
         header { border-bottom: 1px solid var(--divider-color, #ddd); }
         h1 { font-size: 24px; margin: 12px 0 0; }
-        h2 { font-size: 19px; margin-top: 0; }
+        h2, #code-notice { font-size: 19px; font-weight: 700; margin-top: 0; }
         p { line-height: 1.5; }
         a { color: var(--primary-color, #03a9f4); }
         .columns { display: grid; grid-template-columns: 1fr; gap: 24px; }
@@ -185,6 +187,7 @@ class EvoluteLoginPanel extends HTMLElement {
         <div class="columns" hidden>
           <section id="official">
             <h2 id="request-title"></h2><p id="instructions"></p>
+            <p id="code-notice"></p>
             <div id="frame"></div>
           </section>
           <section id="entry">
@@ -216,7 +219,7 @@ class EvoluteLoginPanel extends HTMLElement {
         </div>
       </main>`;
     for (const [id, key] of Object.entries({
-      back: "back", "request-title": "request",
+      back: "back", "request-title": "request", "code-notice": "codeNotice",
       "session-help": this._isolatedLogin ? "isolatedHelp" : "sessionHelp",
       fallback: "fallback", "fallback-help": "fallbackHelp",
       "recovery-title": "recovery", "recovery-help": "recoveryHelp",

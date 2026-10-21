@@ -53,8 +53,8 @@ async def test_register_once_and_require_admin(hass, monkeypatch):
         register.assert_awaited_once_with(
             hass,
             frontend_url_path=PANEL_PATH,
-            webcomponent_name="evolute-login-panel-v7",
-            module_url=f"{SCRIPT_URL}?v=7",
+            webcomponent_name="evolute-login-panel-v8",
+            module_url=f"{SCRIPT_URL}?v=8",
             require_admin=True,
         )
     http.async_register_static_paths.assert_awaited_once()
