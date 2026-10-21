@@ -182,7 +182,6 @@ class EvoluteLoginPanel extends HTMLElement {
       <header><a href="${INTEGRATIONS_URL}" id="back"></a><h1></h1></header>
       <main>
         <p id="status" role="status"></p>
-        <p id="error" role="alert" hidden></p>
         <div class="columns" hidden>
           <section id="official">
             <h2 id="request-title"></h2><p id="instructions"></p>
@@ -191,6 +190,7 @@ class EvoluteLoginPanel extends HTMLElement {
           <section id="entry">
             <h2 id="form-title"></h2>
             <p id="code-help"></p>
+            <p id="error" role="alert" hidden></p>
             <form>
               <div id="phone-field"><label for="phone-number"></label>
                 <input id="phone-number" name="phone_number" type="tel" autocomplete="tel" required>

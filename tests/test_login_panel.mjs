@@ -110,6 +110,7 @@ test("an incorrect code lets the user request another SMS in the same flow", asy
   assert.ok(root.querySelector("iframe") === frame);
   assert.equal(root.getElementById("sms-code").value, "");
   assert.match(root.getElementById("error").textContent, /Код неверный/);
+  assert.equal(root.getElementById("error").closest("section").id, "entry");
   root.getElementById("request-again").click();
   assert.ok(root.querySelector("iframe") !== frame);
   assert.equal(root.querySelector("iframe").src, "https://app.evassist.ru/login");
