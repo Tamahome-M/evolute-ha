@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Tamahome-M/evolute-card
-          ref: f6635cc5ce0c6c0fef9484a324242141912bf6ae
+          ref: ebb9ccea83041fd39451f192ca53e715c9dc1d8b
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
